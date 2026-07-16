@@ -2,6 +2,7 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import Avatar from "../components/Avatar.jsx";
 import PainPointsList from "../components/PainPointsList.jsx";
 import { extractReview } from "../lib/extract.js";
+import { connectSocket } from "../lib/socket.js";
 
 function CircleTimer({ seconds, total }) {
   const r = 34;
@@ -33,20 +34,22 @@ export default function LiveRoom({ meeting, store, go }) {
     return total;
   });
   const [agendaIdx, setAgendaIdx] = useState(0);
+  const [peerCount, setPeerCount] = useState(1);
 
-  // 依議程主題分頁的筆記：{ 主題: 文字 }
   const [topicNotes, setTopicNotes] = useState(() => {
     if (meeting.topicNotes && Object.keys(meeting.topicNotes).length) return meeting.topicNotes;
-    // 相容舊資料：把單一 notes 併入第一個議程
     if (meeting.notes) return { [agenda[0]]: meeting.notes };
     return {};
   });
 
-  const saveTimer = useRef(null);
+  const socketRef = useRef(null);
+  const notesTimer = useRef(null);
   const topic = agenda[agendaIdx];
 
   useEffect(() => {
-    if (meeting.status !== "live") store.updateMeeting(meeting.id, { status: "live", startedAt: Date.now() });
+    if (meeting.status !== "live") {
+      store.updateMeeting(meeting.id, { status: "live", startedAt: Date.now() });
+    }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
@@ -55,15 +58,66 @@ export default function LiveRoom({ meeting, store, go }) {
     return () => clearInterval(id);
   }, []);
 
-  // 自動存檔（debounce）
+  // Socket.io：加入房間、即時共編
   useEffect(() => {
-    clearTimeout(saveTimer.current);
-    saveTimer.current = setTimeout(() => store.updateMeeting(meeting.id, { topicNotes }), 500);
-    return () => clearTimeout(saveTimer.current);
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [topicNotes]);
+    const socket = connectSocket();
+    socketRef.current = socket;
 
-  const setCurrentNote = (val) => setTopicNotes((prev) => ({ ...prev, [topic]: val }));
+    const userName = meeting.participants[0] || "與會者";
+
+    const onJoined = ({ meeting: joined, peerCount: count }) => {
+      if (joined?.topicNotes) setTopicNotes(joined.topicNotes);
+      setPeerCount(count || 1);
+    };
+
+    const onNotesSync = ({ topicNotes: synced, topic: t, content }) => {
+      setTopicNotes((prev) => synced ?? { ...prev, [t]: content ?? "" });
+    };
+
+    const onAgendaSync = ({ agendaIdx: idx }) => {
+      if (typeof idx === "number") setAgendaIdx(idx);
+    };
+
+    const onPeerJoined = ({ peerCount: count }) => setPeerCount(count || 1);
+    const onPeerLeft = () => {
+      setPeerCount((n) => Math.max(1, n - 1));
+    };
+
+    socket.on("meeting:joined", onJoined);
+    socket.on("notes:sync", onNotesSync);
+    socket.on("agenda:sync", onAgendaSync);
+    socket.on("peer:joined", onPeerJoined);
+    socket.on("peer:left", onPeerLeft);
+
+    socket.emit("join-meeting", { meetingId: meeting.id, userName });
+
+    return () => {
+      socket.emit("leave-meeting");
+      socket.off("meeting:joined", onJoined);
+      socket.off("notes:sync", onNotesSync);
+      socket.off("agenda:sync", onAgendaSync);
+      socket.off("peer:joined", onPeerJoined);
+      socket.off("peer:left", onPeerLeft);
+    };
+  }, [meeting.id, meeting.participants]);
+
+  const selectAgenda = (i) => {
+    setAgendaIdx(i);
+    socketRef.current?.emit("agenda:select", { meetingId: meeting.id, agendaIdx: i });
+  };
+
+  const setCurrentNote = (val) => {
+    setTopicNotes((prev) => ({ ...prev, [topic]: val }));
+
+    clearTimeout(notesTimer.current);
+    notesTimer.current = setTimeout(() => {
+      socketRef.current?.emit("notes:update", {
+        meetingId: meeting.id,
+        topic,
+        content: val,
+      });
+    }, 200);
+  };
 
   const totalLines = Object.values(topicNotes).reduce(
     (n, t) => n + (t ? t.split(/\r?\n/).filter(Boolean).length : 0),
@@ -80,9 +134,10 @@ export default function LiveRoom({ meeting, store, go }) {
       .filter(Boolean)
       .join("\n\n");
 
-  const endMeeting = () => {
+  const endMeeting = async () => {
+    clearTimeout(notesTimer.current);
     const review = extractReview(buildForReview(), meeting.participants);
-    store.updateMeeting(meeting.id, {
+    await store.updateMeeting(meeting.id, {
       topicNotes,
       notes: buildDisplay(),
       status: "done",
@@ -93,8 +148,10 @@ export default function LiveRoom({ meeting, store, go }) {
     go("post", meeting.id);
   };
 
-  const saveLater = () => {
-    store.updateMeeting(meeting.id, { topicNotes });
+  const saveLater = async () => {
+    clearTimeout(notesTimer.current);
+    socketRef.current?.emit("notes:update", { meetingId: meeting.id, topicNotes });
+    await store.updateMeeting(meeting.id, { topicNotes });
     go("dashboard");
   };
 
@@ -107,7 +164,7 @@ export default function LiveRoom({ meeting, store, go }) {
           <span className="text-lg">📌</span>
           <p className="font-bold text-sm sm:text-base truncate">本次會議目標：{meeting.goals.join("；") || meeting.title}</p>
           <span className="ml-auto hidden sm:flex items-center gap-1.5 text-xs font-semibold bg-mint-500/20 text-mint-200 px-2.5 py-1 rounded-full">
-            <span className="h-1.5 w-1.5 rounded-full bg-mint-300 animate-pulse"></span> 進行中
+            <span className="h-1.5 w-1.5 rounded-full bg-mint-300 animate-pulse"></span> 進行中 · {peerCount} 人在線
           </span>
         </div>
       </div>
@@ -134,7 +191,7 @@ export default function LiveRoom({ meeting, store, go }) {
               return (
                 <button
                   key={i}
-                  onClick={() => setAgendaIdx(i)}
+                  onClick={() => selectAgenda(i)}
                   className={`w-full text-left flex items-center gap-3 p-3 rounded-2xl border transition-colors ${i === agendaIdx ? "bg-mint-50 border-mint-200" : "bg-white border-navy-800/8 hover:border-mint-200"}`}
                 >
                   <span className={`h-6 w-6 shrink-0 rounded-full flex items-center justify-center text-xs font-bold ${i === agendaIdx ? "bg-mint-500 text-white" : "bg-navy-800/8 text-navy-400"}`}>{i + 1}</span>
@@ -145,7 +202,7 @@ export default function LiveRoom({ meeting, store, go }) {
               );
             })}
           </div>
-          <button onClick={() => setAgendaIdx((i) => Math.min(i + 1, agenda.length - 1))} className="mt-4 w-full text-sm font-semibold text-navy-600 border border-navy-800/10 rounded-xl py-2.5 hover:bg-navy-800/[0.03] transition-colors">
+          <button onClick={() => selectAgenda(Math.min(agendaIdx + 1, agenda.length - 1))} className="mt-4 w-full text-sm font-semibold text-navy-600 border border-navy-800/10 rounded-xl py-2.5 hover:bg-navy-800/[0.03] transition-colors">
             下一個議程 →
           </button>
         </div>
@@ -174,7 +231,7 @@ export default function LiveRoom({ meeting, store, go }) {
             {agenda.map((a, i) => (
               <button
                 key={i}
-                onClick={() => setAgendaIdx(i)}
+                onClick={() => selectAgenda(i)}
                 className={`shrink-0 flex items-center gap-1.5 text-xs font-semibold px-3 py-2 rounded-t-lg transition-colors ${i === agendaIdx ? "bg-mint-50 text-mint-700 border-b-2 border-mint-500" : "text-navy-400 hover:text-navy-700"}`}
               >
                 {i + 1}. {a.length > 10 ? a.slice(0, 10) + "…" : a}
@@ -187,11 +244,11 @@ export default function LiveRoom({ meeting, store, go }) {
             key={agendaIdx}
             value={topicNotes[topic] || ""}
             onChange={(e) => setCurrentNote(e.target.value)}
-            placeholder={`「${topic}」的討論重點寫在這裡，一行一個。\n切換上方議程即切換到該主題的筆記頁，不會混在一起。`}
+            placeholder={`「${topic}」的討論重點寫在這裡，一行一個。\n多人同時編輯會即時同步，切換議程不會混在一起。`}
             className="w-full h-[360px] resize-none px-5 py-4 text-sm leading-relaxed text-navy-800 font-mono placeholder-navy-300 focus:bg-mint-50/20 transition-colors"
           />
           <div className="px-5 py-3 border-t border-navy-800/6 flex items-center justify-between bg-navy-800/[0.015]">
-            <span className="text-xs text-navy-300">已自動儲存 · 全部 {totalLines} 行</span>
+            <span className="text-xs text-navy-300">即時同步 · 全部 {totalLines} 行</span>
             <div className="flex gap-2">
               <button onClick={saveLater} className="text-xs font-semibold text-navy-500 px-3 py-1.5 rounded-lg hover:bg-navy-800/5 transition-colors">稍後再開</button>
               <button onClick={endMeeting} className="text-xs font-semibold text-white bg-navy-800 px-3 py-1.5 rounded-lg hover:bg-navy-700 transition-colors">結束會議 → AI 整理</button>

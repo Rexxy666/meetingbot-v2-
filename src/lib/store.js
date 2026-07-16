@@ -1,66 +1,96 @@
-import { useCallback, useEffect, useState } from "react";
-
-const KEY = "guanhui.meetings.v1";
-
-function load() {
-  try {
-    const raw = localStorage.getItem(KEY);
-    return raw ? JSON.parse(raw) : [];
-  } catch {
-    return [];
-  }
-}
-
-function save(meetings) {
-  localStorage.setItem(KEY, JSON.stringify(meetings));
-}
-
-const uid = () =>
-  (crypto.randomUUID && crypto.randomUUID()) ||
-  Date.now().toString(36) + Math.random().toString(36).slice(2);
+import { useCallback, useEffect, useRef, useState } from "react";
+import * as api from "./api.js";
+import { connectSocket } from "./socket.js";
 
 /**
- * 單一資料來源：所有會議存在 localStorage。
- * 提供實際的新增／更新／刪除操作，讓整個網站真正可運作。
+ * 單一資料來源：所有會議由後端 API 管理，Socket.io 接收即時更新。
  */
 export function useMeetings() {
-  const [meetings, setMeetings] = useState(load);
+  const [meetings, setMeetings] = useState([]);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState(null);
+  const meetingsRef = useRef(meetings);
+  meetingsRef.current = meetings;
+
+  const refreshMeetings = useCallback(async () => {
+    try {
+      const list = await api.fetchMeetings();
+      setMeetings(list);
+      setError(null);
+    } catch (e) {
+      setError(e.message);
+    } finally {
+      setLoading(false);
+    }
+  }, []);
 
   useEffect(() => {
-    save(meetings);
-  }, [meetings]);
+    refreshMeetings();
+  }, [refreshMeetings]);
 
-  const createMeeting = useCallback((data) => {
-    const m = {
-      id: uid(),
-      title: data.title.trim(),
-      participants: data.participants || [],
-      pains: data.pains || [],
-      goals: data.goals || [],
-      links: data.links || [],
-      durationMin: data.durationMin || 30,
-      notes: "", // 結束時彙整的完整筆記（含各議程標題）
-      topicNotes: {}, // 依議程主題分頁的筆記：{ 主題: 文字 }
-      status: "ready", // ready → live → done
-      createdAt: Date.now(),
-      startedAt: null,
-      endedAt: null,
-      review: null, // 會後 AI 整理結果
-      actions: [], // [{id, task, who, when, done}]
+  useEffect(() => {
+    const socket = connectSocket();
+
+    const onUpdated = (meeting) => {
+      setMeetings((prev) => {
+        const idx = prev.findIndex((m) => m.id === meeting.id);
+        if (idx === -1) return [meeting, ...prev];
+        const next = [...prev];
+        next[idx] = meeting;
+        return next;
+      });
     };
-    setMeetings((prev) => [m, ...prev]);
-    return m.id;
+
+    const onDeleted = ({ id }) => {
+      setMeetings((prev) => prev.filter((m) => m.id !== id));
+    };
+
+    socket.on("meeting:updated", onUpdated);
+    socket.on("meeting:deleted", onDeleted);
+
+    return () => {
+      socket.off("meeting:updated", onUpdated);
+      socket.off("meeting:deleted", onDeleted);
+    };
   }, []);
 
-  const updateMeeting = useCallback((id, patch) => {
-    setMeetings((prev) =>
-      prev.map((m) => (m.id === id ? { ...m, ...(typeof patch === "function" ? patch(m) : patch) } : m))
-    );
+  const createMeeting = useCallback(async (data) => {
+    const meeting = await api.createMeeting(data);
+    setMeetings((prev) => [meeting, ...prev]);
+    return meeting.id;
   }, []);
 
-  const deleteMeeting = useCallback((id) => {
+  const updateMeeting = useCallback(async (id, patch) => {
+    const current = meetingsRef.current.find((m) => m.id === id);
+    if (!current) return null;
+
+    const patchBody = typeof patch === "function" ? patch(current) : patch;
+
+    setMeetings((prev) => prev.map((m) => (m.id === id ? { ...m, ...patchBody } : m)));
+
+    try {
+      const updated = await api.patchMeeting(id, patchBody);
+      setMeetings((prev) => prev.map((m) => (m.id === id ? updated : m)));
+      return updated;
+    } catch (e) {
+      await refreshMeetings();
+      throw e;
+    }
+  }, [refreshMeetings]);
+
+  const deleteMeeting = useCallback(async (id) => {
+    await api.deleteMeeting(id);
     setMeetings((prev) => prev.filter((m) => m.id !== id));
   }, []);
 
-  return { meetings, createMeeting, updateMeeting, deleteMeeting, setMeetings };
+  return {
+    meetings,
+    loading,
+    error,
+    createMeeting,
+    updateMeeting,
+    deleteMeeting,
+    refreshMeetings,
+    setMeetings,
+  };
 }

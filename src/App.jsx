@@ -47,7 +47,7 @@ export default function App() {
       {page === "todo" && <Todo meetings={meetings} store={store} go={go} />}
 
       <footer className="max-w-7xl mx-auto px-6 py-8 text-center text-xs text-navy-300">
-        關會 GuanHui · 讓每一場會議都值得 · 資料儲存在此瀏覽器
+        關會 GuanHui · 讓每一場會議都值得 · 資料儲存於後端伺服器
       </footer>
     </div>
   );

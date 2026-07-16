@@ -34,15 +34,15 @@ export default function PostMeeting({ meeting, store, go }) {
   const actions = meeting.actions && meeting.actions.length ? meeting.actions : review.actions;
   const [copied, setCopied] = useState(null);
 
-  const toggleDone = (aid) => {
-    store.updateMeeting(meeting.id, (m) => ({
+  const toggleDone = async (aid) => {
+    await store.updateMeeting(meeting.id, (m) => ({
       actions: (m.actions || []).map((a) => (a.id === aid ? { ...a, done: !a.done } : a)),
     }));
   };
 
-  const reRun = () => {
+  const reRun = async () => {
     const r = extractReview(meeting.notes, meeting.participants);
-    store.updateMeeting(meeting.id, { review: r, actions: r.actions });
+    await store.updateMeeting(meeting.id, { review: r, actions: r.actions });
   };
 
   const copyItem = (a) => {

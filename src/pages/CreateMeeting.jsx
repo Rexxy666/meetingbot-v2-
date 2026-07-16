@@ -77,7 +77,7 @@ function Rule({ ok, label, muted }) {
   );
 }
 
-function GateStatusCard({ state, canCreate, onCreate }) {
+function GateStatusCard({ state, canCreate, onCreate, creating }) {
   const cfg = {
     block: { wrap: "bg-coral-50 border-coral-200", badge: "bg-coral-100 text-coral-500", title: "text-coral-500", icon: "⚠️", label: "阻擋中", heading: "目標尚未明確", body: "至少新增一項「預期目標」，否則系統會建議改用 Email 溝通，並阻止此會議發起。" },
     warn: { wrap: "bg-coral-50/60 border-coral-200", badge: "bg-coral-100 text-coral-500", title: "text-coral-500", icon: "⚠️", label: "警告", heading: "會議時間偏長", body: "偵測到會議時間大於 60 分鐘，建議拆分議程或縮短時間，但仍可建立。" },
@@ -100,12 +100,12 @@ function GateStatusCard({ state, canCreate, onCreate }) {
       </div>
 
       <button
-        disabled={!canCreate.ok}
+        disabled={!canCreate.ok || creating}
         onClick={onCreate}
         className={`mt-6 w-full font-bold py-3 rounded-2xl transition-all duration-150 active:scale-[0.98]
-          ${canCreate.ok ? "bg-mint-500 text-white shadow-glow hover:bg-mint-600" : "bg-navy-800/5 text-navy-300 cursor-not-allowed"}`}
+          ${canCreate.ok && !creating ? "bg-mint-500 text-white shadow-glow hover:bg-mint-600" : "bg-navy-800/5 text-navy-300 cursor-not-allowed"}`}
       >
-        {canCreate.ok ? "🚀 建立會議看板" : "尚未通過守門條件"}
+        {creating ? "建立中…" : canCreate.ok ? "🚀 建立會議看板" : "尚未通過守門條件"}
       </button>
     </div>
   );
@@ -132,6 +132,8 @@ export default function CreateMeeting({ store, go }) {
   const [goals, setGoals] = useState([]);
   const [links, setLinks] = useState([]);
   const [duration, setDuration] = useState(30);
+  const [creating, setCreating] = useState(false);
+  const [createError, setCreateError] = useState(null);
 
   const state = useMemo(() => {
     if (!goals.length) return "block";
@@ -145,10 +147,18 @@ export default function CreateMeeting({ store, go }) {
     ok: title.trim().length > 0 && goals.length > 0,
   };
 
-  const handleCreate = () => {
-    if (!canCreate.ok) return;
-    const id = store.createMeeting({ title, participants, pains, goals, links, durationMin: duration });
-    go("dashboard", id);
+  const handleCreate = async () => {
+    if (!canCreate.ok || creating) return;
+    setCreating(true);
+    setCreateError(null);
+    try {
+      const id = await store.createMeeting({ title, participants, pains, goals, links, durationMin: duration });
+      go("dashboard", id);
+    } catch (e) {
+      setCreateError(e.message || "建立會議失敗，請確認後端已啟動");
+    } finally {
+      setCreating(false);
+    }
   };
 
   const addTagGoal = (t) => {
@@ -213,7 +223,8 @@ export default function CreateMeeting({ store, go }) {
 
         {/* 右：動態守門狀態 */}
         <div className="lg:sticky lg:top-24 self-start">
-          <GateStatusCard state={state} canCreate={canCreate} onCreate={handleCreate} />
+          <GateStatusCard state={state} canCreate={canCreate} onCreate={handleCreate} creating={creating} />
+          {createError && <p className="mt-3 text-sm text-coral-500 text-center">{createError}</p>}
           <p className="text-center text-xs text-navy-300 mt-3">
             右側卡片會隨左側輸入即時變化：<span className="text-coral-400 font-semibold">阻擋</span> → <span className="text-coral-400 font-semibold">警告</span> → <span className="text-mint-600 font-semibold">通行</span>
           </p>
