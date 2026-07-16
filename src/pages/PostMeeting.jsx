@@ -1,5 +1,6 @@
 import { useState } from "react";
 import Avatar from "../components/Avatar.jsx";
+import PainPointsList from "../components/PainPointsList.jsx";
 import { extractReview } from "../lib/extract.js";
 
 function AICard({ tone, icon, title, items, empty }) {
@@ -68,6 +69,13 @@ export default function PostMeeting({ meeting, store, go }) {
           重新整理
         </button>
       </div>
+
+      {meeting.pains?.length > 0 && (
+        <div className="mt-6">
+          <PainPointsList pains={meeting.pains} />
+          <p className="mt-2 text-xs text-navy-400">會議當初想解決的問題，對照下方 AI 整理結果檢視是否已處理。</p>
+        </div>
+      )}
 
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-6 mt-6">
         {/* 左：原始筆記 */}

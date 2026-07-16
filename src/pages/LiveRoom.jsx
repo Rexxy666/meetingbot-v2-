@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import Avatar from "../components/Avatar.jsx";
+import PainPointsList from "../components/PainPointsList.jsx";
 import { extractReview } from "../lib/extract.js";
 
 function CircleTimer({ seconds, total }) {
@@ -99,8 +100,9 @@ export default function LiveRoom({ meeting, store, go }) {
 
   return (
     <div className="fade-in max-w-7xl mx-auto px-6 py-6">
-      {/* 頂部常駐目標 */}
-      <div className="sticky top-16 z-20 -mx-2 mb-5">
+      {/* 頂部常駐：痛點 + 目標 */}
+      <div className="sticky top-16 z-20 -mx-2 mb-5 space-y-2">
+        <PainPointsList pains={meeting.pains} />
         <div className="bg-navy-800 text-white rounded-2xl px-5 py-3.5 shadow-card-hover flex items-center gap-3">
           <span className="text-lg">📌</span>
           <p className="font-bold text-sm sm:text-base truncate">本次會議目標：{meeting.goals.join("；") || meeting.title}</p>
@@ -121,6 +123,11 @@ export default function LiveRoom({ meeting, store, go }) {
               <p className="text-xs text-mint-600 font-semibold mt-1">Time Boxing · 共 {agenda.length} 項</p>
             </div>
           </div>
+          {meeting.pains?.length > 0 && (
+            <div className="mt-5 pt-5 border-t border-navy-800/8">
+              <PainPointsList pains={meeting.pains} compact />
+            </div>
+          )}
           <div className="mt-5 space-y-2">
             {agenda.map((a, i) => {
               const hasNote = (topicNotes[a] || "").trim().length > 0;
