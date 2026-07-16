@@ -1,3 +1,6 @@
+import { useEffect } from "react";
+import { API_BASE } from "../lib/api.js";
+
 function MetricCard({ tone, kicker, value, sub, icon }) {
   const tones = {
     mint: "from-mint-50 to-white border-mint-100",
@@ -64,7 +67,12 @@ function MeetingRow({ m, go, onDelete }) {
 }
 
 export default function Dashboard({ store, go }) {
-  const { meetings, deleteMeeting } = store;
+  const { meetings, deleteMeeting, refreshMeetings, loading, error } = store;
+
+  useEffect(() => {
+    refreshMeetings();
+  }, [refreshMeetings]);
+
   const done = meetings.filter((m) => m.status === "done");
   const savedHours = (done.length * 0.6).toFixed(1); // 每場守門把關約省 36 分鐘
   const openActions = meetings.reduce((n, m) => n + (m.actions || []).filter((a) => !a.done).length, 0);
@@ -97,7 +105,17 @@ export default function Dashboard({ store, go }) {
         <span className="text-xs font-semibold text-navy-400">{meetings.length} 場</span>
       </div>
 
-      {meetings.length === 0 ? (
+      {error && (
+        <p className="mt-4 text-sm text-coral-500 bg-coral-50 border border-coral-100 rounded-xl px-4 py-3">
+          無法連線後端：{error}
+          <br />
+          <span className="text-navy-500">連線位址：{API_BASE}　·　若剛改後端請先推送到 GitHub 並在 Render 重新 Deploy</span>
+        </p>
+      )}
+
+      {loading ? (
+        <p className="mt-8 text-sm text-navy-400 text-center">載入會議列表中…</p>
+      ) : meetings.length === 0 ? (
         <div className="mt-4 border-2 border-dashed border-navy-800/10 rounded-3xl py-16 text-center">
           <div className="text-4xl">🗓️</div>
           <p className="mt-3 font-bold text-navy-700">還沒有會議</p>

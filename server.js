@@ -4,20 +4,87 @@ import { createServer } from "http";
 import { Server } from "socket.io";
 
 const PORT = Number(process.env.PORT) || 3001;
-const CLIENT_ORIGIN = process.env.CLIENT_ORIGIN || "http://localhost:5173";
+
+// 本地開發 + 環境變數額外來源（逗號分隔）
+const DEFAULT_ALLOWED_ORIGINS = [
+  "http://localhost:5173",
+  "http://localhost:5174",
+  "http://127.0.0.1:5173",
+  "http://127.0.0.1:5174",
+];
+const ENV_ALLOWED_ORIGINS = (process.env.CLIENT_ORIGIN || "")
+  .split(",")
+  .map((s) => s.trim())
+  .filter(Boolean);
+const ALLOWED_ORIGINS = [...new Set([...DEFAULT_ALLOWED_ORIGINS, ...ENV_ALLOWED_ORIGINS])];
+
+// 開發／MVP：若未設定嚴格白名單以外的限制，允許所有來源（避免 Render ↔ localhost CORS 失敗）
+const ALLOW_ALL_ORIGINS = process.env.CORS_ALLOW_ALL !== "false";
+
+function isOriginAllowed(origin) {
+  if (!origin) return true;
+  if (ALLOW_ALL_ORIGINS) return true;
+  return ALLOWED_ORIGINS.includes(origin);
+}
 
 const app = express();
 const httpServer = createServer(app);
 
 const io = new Server(httpServer, {
   cors: {
-    origin: CLIENT_ORIGIN,
-    methods: ["GET", "POST", "PATCH", "DELETE"],
+    origin: (origin, cb) => cb(null, isOriginAllowed(origin) ? origin || true : false),
+    methods: ["GET", "POST", "PATCH", "DELETE", "OPTIONS"],
+    credentials: false,
   },
 });
 
-app.use(cors({ origin: CLIENT_ORIGIN }));
+app.use(
+  cors({
+    origin: (origin, cb) => {
+      if (isOriginAllowed(origin)) {
+        // 回傳實際 origin，讓瀏覽器通過跨域檢查
+        cb(null, origin || true);
+      } else {
+        cb(new Error(`CORS blocked: ${origin}`));
+      }
+    },
+    methods: ["GET", "POST", "PATCH", "DELETE", "OPTIONS"],
+    allowedHeaders: ["Content-Type", "Authorization"],
+    credentials: false,
+  })
+);
 app.use(express.json());
+
+app.get("/", (_req, res) => {
+  res.status(200).type("html").send(`<!doctype html>
+<html lang="zh-Hant">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>MeetingBot Backend</title>
+    <style>
+      body { font-family: ui-sans-serif, system-ui, -apple-system, Segoe UI, Roboto, sans-serif; margin: 0; background: #f8fafc; color: #0f172a; }
+      main { max-width: 760px; margin: 56px auto; background: #fff; border: 1px solid #e2e8f0; border-radius: 16px; padding: 28px; }
+      h1 { margin: 0 0 8px; font-size: 24px; }
+      p { margin: 0 0 12px; line-height: 1.6; color: #334155; }
+      code { background: #f1f5f9; padding: 2px 6px; border-radius: 6px; }
+      a { color: #0284c7; text-decoration: none; }
+      a:hover { text-decoration: underline; }
+      .ok { display:inline-block; margin-top: 8px; padding: 6px 10px; border-radius: 999px; background:#dcfce7; color:#166534; font-size: 12px; font-weight: 700; }
+    </style>
+  </head>
+  <body>
+    <main>
+      <h1>MeetingBot 後端服務已啟動</h1>
+      <span class="ok">ONLINE</span>
+      <p style="margin-top:16px">這是 API / Socket.io 服務。前端請用本地 Vite（或另外部署的前端）連線此網址。</p>
+      <p>健康檢查：<a href="/api/health"><code>/api/health</code></a></p>
+      <p>會議列表：<a href="/api/meetings"><code>/api/meetings</code></a></p>
+      <p>CORS：${ALLOW_ALL_ORIGINS ? "允許所有來源（MVP）" : ALLOWED_ORIGINS.join(", ")}</p>
+    </main>
+  </body>
+</html>`);
+});
 
 /** @type {Map<string, object>} */
 const meetings = new Map();
@@ -147,7 +214,6 @@ io.on("connection", (socket) => {
     currentRoom = null;
   });
 
-  // 議程筆記即時同步（LiveRoom topicNotes）
   socket.on("notes:update", ({ meetingId, topicNotes, topic, content } = {}) => {
     if (!meetingId || !meetings.has(meetingId)) return;
 
@@ -169,13 +235,11 @@ io.on("connection", (socket) => {
     });
   });
 
-  // 議程焦點同步（可選：讓與會者看到目前討論哪一項）
   socket.on("agenda:select", ({ meetingId, agendaIdx } = {}) => {
     if (!meetingId) return;
     socket.to(meetingId).emit("agenda:sync", { meetingId, agendaIdx, from: socket.id });
   });
 
-  // 會議狀態同步（開始、結束、稍後再開等）
   socket.on("meeting:patch", ({ meetingId, patch } = {}) => {
     if (!meetingId || !meetings.has(meetingId) || !patch) return;
 
@@ -194,5 +258,6 @@ io.on("connection", (socket) => {
 
 httpServer.listen(PORT, () => {
   console.log(`[guanhui-server] API + Socket.io → http://localhost:${PORT}`);
-  console.log(`[guanhui-server] CORS 允許來源 → ${CLIENT_ORIGIN}`);
+  console.log(`[guanhui-server] CORS allow all → ${ALLOW_ALL_ORIGINS}`);
+  console.log(`[guanhui-server] Extra origins → ${ALLOWED_ORIGINS.join(", ")}`);
 });
