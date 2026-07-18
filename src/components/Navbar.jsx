@@ -7,7 +7,7 @@ const tabs = [
   { id: "todo", label: "待辦任務", icon: "M9 11l3 3L22 4M21 12v7a2 2 0 01-2 2H5a2 2 0 01-2-2V5a2 2 0 012-2h11" },
 ];
 
-export default function Navbar({ page, setPage, todoCount = 0 }) {
+export default function Navbar({ page, setPage, todoCount = 0, user, onLogout }) {
   return (
     <header className="sticky top-0 z-30 bg-white/85 backdrop-blur-md border-b border-navy-800/5">
       <div className="max-w-7xl mx-auto px-6 h-16 flex items-center justify-between">
@@ -35,7 +35,17 @@ export default function Navbar({ page, setPage, todoCount = 0 }) {
           ))}
         </nav>
         <div className="flex items-center gap-3">
-          <Avatar name="Rex" />
+          <div className="hidden sm:block text-right leading-tight">
+            <p className="text-sm font-semibold text-navy-700">{user?.name || "使用者"}</p>
+            <p className="text-[11px] text-navy-300">{user?.email}</p>
+          </div>
+          <Avatar name={user?.name || "U"} />
+          <button
+            onClick={onLogout}
+            className="text-xs font-semibold text-navy-500 border border-navy-800/10 px-3 py-1.5 rounded-xl hover:border-coral-300 hover:text-coral-500 transition-colors"
+          >
+            登出
+          </button>
         </div>
       </div>
     </header>

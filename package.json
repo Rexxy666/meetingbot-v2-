@@ -12,8 +12,11 @@
     "preview": "vite preview"
   },
   "dependencies": {
+    "bcryptjs": "^3.0.3",
     "cors": "^2.8.6",
     "express": "^4.22.2",
+    "jsonwebtoken": "^9.0.3",
+    "mongoose": "^8.24.1",
     "react": "^18.2.0",
     "react-dom": "^18.2.0",
     "socket.io": "^4.8.3",

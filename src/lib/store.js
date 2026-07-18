@@ -1,18 +1,23 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import * as api from "./api.js";
-import { connectSocket } from "./socket.js";
+import { connectSocket, disconnectSocket } from "./socket.js";
 
 /**
- * 單一資料來源：所有會議由後端 API 管理，Socket.io 接收即時更新。
+ * 登入後才載入：後端只回傳目前使用者的會議。
  */
-export function useMeetings() {
+export function useMeetings(enabled = true) {
   const [meetings, setMeetings] = useState([]);
-  const [loading, setLoading] = useState(true);
+  const [loading, setLoading] = useState(Boolean(enabled));
   const [error, setError] = useState(null);
   const meetingsRef = useRef(meetings);
   meetingsRef.current = meetings;
 
   const refreshMeetings = useCallback(async () => {
+    if (!enabled) {
+      setMeetings([]);
+      setLoading(false);
+      return;
+    }
     try {
       const list = await api.fetchMeetings();
       setMeetings(list);
@@ -22,13 +27,23 @@ export function useMeetings() {
     } finally {
       setLoading(false);
     }
-  }, []);
+  }, [enabled]);
 
   useEffect(() => {
+    if (!enabled) {
+      setMeetings([]);
+      setLoading(false);
+      setError(null);
+      disconnectSocket();
+      return;
+    }
+    setLoading(true);
     refreshMeetings();
-  }, [refreshMeetings]);
+  }, [enabled, refreshMeetings]);
 
   useEffect(() => {
+    if (!enabled) return undefined;
+
     const socket = connectSocket();
 
     const onUpdated = (meeting) => {
@@ -52,7 +67,7 @@ export function useMeetings() {
       socket.off("meeting:updated", onUpdated);
       socket.off("meeting:deleted", onDeleted);
     };
-  }, []);
+  }, [enabled]);
 
   const createMeeting = useCallback(async (data) => {
     const meeting = await api.createMeeting(data);
@@ -60,23 +75,25 @@ export function useMeetings() {
     return meeting.id;
   }, []);
 
-  const updateMeeting = useCallback(async (id, patch) => {
-    const current = meetingsRef.current.find((m) => m.id === id);
-    if (!current) return null;
+  const updateMeeting = useCallback(
+    async (id, patch) => {
+      const current = meetingsRef.current.find((m) => m.id === id);
+      if (!current) return null;
 
-    const patchBody = typeof patch === "function" ? patch(current) : patch;
+      const patchBody = typeof patch === "function" ? patch(current) : patch;
+      setMeetings((prev) => prev.map((m) => (m.id === id ? { ...m, ...patchBody } : m)));
 
-    setMeetings((prev) => prev.map((m) => (m.id === id ? { ...m, ...patchBody } : m)));
-
-    try {
-      const updated = await api.patchMeeting(id, patchBody);
-      setMeetings((prev) => prev.map((m) => (m.id === id ? updated : m)));
-      return updated;
-    } catch (e) {
-      await refreshMeetings();
-      throw e;
-    }
-  }, [refreshMeetings]);
+      try {
+        const updated = await api.patchMeeting(id, patchBody);
+        setMeetings((prev) => prev.map((m) => (m.id === id ? updated : m)));
+        return updated;
+      } catch (e) {
+        await refreshMeetings();
+        throw e;
+      }
+    },
+    [refreshMeetings]
+  );
 
   const deleteMeeting = useCallback(async (id) => {
     await api.deleteMeeting(id);
