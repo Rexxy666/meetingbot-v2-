@@ -1,18 +1,20 @@
 import { io } from "socket.io-client";
+import { resolveApiBase } from "./api.js";
 import { getToken } from "./session.js";
-
-const SOCKET_URL =
-  import.meta.env.VITE_API_URL ||
-  (import.meta.env.DEV ? "http://localhost:3001" : "https://meetingbot-v2-qyxm.onrender.com");
 
 let socket = null;
 
+function socketUrl() {
+  return resolveApiBase();
+}
+
 export function getSocket() {
   const token = getToken();
+  const url = socketUrl();
   if (!socket) {
-    socket = io(SOCKET_URL, {
+    socket = io(url, {
       autoConnect: false,
-      transports: ["websocket", "polling"],
+      transports: ["polling", "websocket"], // Safari 私密模式較穩定先走 polling
       withCredentials: false,
       auth: { token },
     });
@@ -22,13 +24,19 @@ export function getSocket() {
   return socket;
 }
 
+/** 連線（已連線則不強制斷線，避免打斷會議房間） */
 export function connectSocket() {
   const s = getSocket();
-  if (s.connected) {
-    // token 可能已更新，重連以帶上新 auth
-    s.disconnect();
-  }
   s.auth = { token: getToken() };
+  if (!s.connected) s.connect();
+  return s;
+}
+
+/** 換帳號時才需要強制重連 */
+export function reconnectSocket() {
+  const s = getSocket();
+  s.auth = { token: getToken() };
+  if (s.connected) s.disconnect();
   s.connect();
   return s;
 }

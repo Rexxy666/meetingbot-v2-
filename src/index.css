@@ -6,6 +6,15 @@ body {
   background: #f7fafb;
   -webkit-font-smoothing: antialiased;
 }
+
+/* 隱藏水平捲軸（統計橫向滾動用）*/
+.no-scrollbar::-webkit-scrollbar {
+  display: none;
+}
+.no-scrollbar {
+  -ms-overflow-style: none;
+  scrollbar-width: none;
+}
 ::selection {
   background: #a7efe1;
 }

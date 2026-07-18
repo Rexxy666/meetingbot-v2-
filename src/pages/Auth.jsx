@@ -11,6 +11,7 @@ function PasswordField({ value, onChange, placeholder = "至少 6 碼" }) {
         onChange={onChange}
         required
         minLength={6}
+        autoComplete="current-password"
         placeholder={placeholder}
         className="w-full rounded-2xl border border-navy-800/10 px-4 py-3 pr-12 text-sm text-navy-800 placeholder-navy-300 focus:border-mint-400 focus:shadow-glow transition-all"
       />
@@ -44,22 +45,35 @@ export default function Auth({ auth }) {
   const [password, setPassword] = useState("");
   const [error, setError] = useState(null);
   const [busy, setBusy] = useState(false);
+  const [hint, setHint] = useState(null);
 
   const submit = async (e) => {
     e.preventDefault();
     setBusy(true);
     setError(null);
+    setHint(null);
+    const cleanEmail = email.trim().toLowerCase();
     try {
       if (mode === "register") {
-        await auth.register({ name, email, password });
+        await auth.register({ name: name.trim(), email: cleanEmail, password });
       } else {
-        await auth.login({ email, password });
+        await auth.login({ email: cleanEmail, password });
       }
     } catch (err) {
       setError(err.message || "操作失敗");
+      if (err.status === 404 || /尚未註冊/.test(err.message || "")) {
+        setHint("提示：帳號存在後端，不是瀏覽器。若你換過本機／Render 後端，請重新註冊一次。");
+      }
     } finally {
       setBusy(false);
     }
+  };
+
+  const clearCache = () => {
+    auth.resetLocalCache?.();
+    setError(null);
+    setHint("已清除本機登入快取。請重新註冊或登入。");
+    setPassword("");
   };
 
   return (
@@ -68,6 +82,7 @@ export default function Auth({ auth }) {
         <div className="text-center mb-8">
           <h1 className="text-3xl font-black text-mint-600 tracking-tight">MeetFlow</h1>
           <p className="mt-2 text-sm text-navy-400">登入後只會看到屬於你的會議與待辦</p>
+          <p className="mt-1 text-[11px] text-navy-300">後端：{auth.apiBase || "—"}</p>
         </div>
 
         <div className="bg-white border border-navy-800/8 rounded-3xl shadow-card p-6">
@@ -77,6 +92,7 @@ export default function Auth({ auth }) {
               onClick={() => {
                 setMode("login");
                 setError(null);
+                setHint(null);
               }}
               className={`flex-1 text-sm font-semibold py-2 rounded-xl transition-colors ${mode === "login" ? "bg-white text-mint-600 shadow-card" : "text-navy-400"}`}
             >
@@ -87,6 +103,7 @@ export default function Auth({ auth }) {
               onClick={() => {
                 setMode("register");
                 setError(null);
+                setHint(null);
               }}
               className={`flex-1 text-sm font-semibold py-2 rounded-xl transition-colors ${mode === "register" ? "bg-white text-mint-600 shadow-card" : "text-navy-400"}`}
             >
@@ -102,6 +119,7 @@ export default function Auth({ auth }) {
                   value={name}
                   onChange={(e) => setName(e.target.value)}
                   required
+                  autoComplete="name"
                   placeholder="例：Rex"
                   className="w-full rounded-2xl border border-navy-800/10 px-4 py-3 text-sm text-navy-800 placeholder-navy-300 focus:border-mint-400 focus:shadow-glow transition-all"
                 />
@@ -114,6 +132,7 @@ export default function Auth({ auth }) {
                 value={email}
                 onChange={(e) => setEmail(e.target.value)}
                 required
+                autoComplete="email"
                 placeholder="you@example.com"
                 className="w-full rounded-2xl border border-navy-800/10 px-4 py-3 text-sm text-navy-800 placeholder-navy-300 focus:border-mint-400 focus:shadow-glow transition-all"
               />
@@ -126,6 +145,9 @@ export default function Auth({ auth }) {
             {error && (
               <p className="text-sm text-coral-500 bg-coral-50 border border-coral-100 rounded-xl px-3 py-2">{error}</p>
             )}
+            {hint && (
+              <p className="text-xs text-navy-500 bg-navy-800/[0.03] border border-navy-800/8 rounded-xl px-3 py-2">{hint}</p>
+            )}
 
             <button
               type="submit"
@@ -135,6 +157,14 @@ export default function Auth({ auth }) {
               {busy ? "處理中…" : mode === "register" ? "建立帳號" : "登入"}
             </button>
           </form>
+
+          <button
+            type="button"
+            onClick={clearCache}
+            className="mt-4 w-full text-xs font-semibold text-navy-400 hover:text-coral-500 transition-colors"
+          >
+            登入異常？清除本機登入快取
+          </button>
         </div>
       </div>
     </div>

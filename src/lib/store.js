@@ -72,7 +72,7 @@ export function useMeetings(enabled = true) {
   const createMeeting = useCallback(async (data) => {
     const meeting = await api.createMeeting(data);
     setMeetings((prev) => [meeting, ...prev]);
-    return meeting.id;
+    return meeting;
   }, []);
 
   const updateMeeting = useCallback(
