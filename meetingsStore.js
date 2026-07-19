@@ -39,6 +39,16 @@ const meetingSchema = new mongoose.Schema(
 
 const MeetingModel = mongoose.models.Meeting || mongoose.model("Meeting", meetingSchema);
 
+/** 儲存層防禦：永遠不可經 patch 覆寫身分欄位 */
+function stripIdentity(patch = {}) {
+  const next = { ...patch };
+  delete next.id;
+  delete next.ownerId;
+  delete next.memberIds;
+  delete next.createdAt;
+  return next;
+}
+
 function toPlain(doc) {
   if (!doc) return null;
   const o = typeof doc.toObject === "function" ? doc.toObject() : { ...doc };
@@ -112,7 +122,8 @@ function createJsonStore() {
       const idx = list.findIndex((m) => m.id === id && (m.ownerId === userId || (m.memberIds || []).includes(userId)));
       if (idx === -1) return null;
       const base = list[idx];
-      const updated = { ...base, ...patch, id, ownerId: base.ownerId, memberIds: base.memberIds || [] };
+      const safe = stripIdentity(patch);
+      const updated = { ...base, ...safe, id, ownerId: base.ownerId, memberIds: base.memberIds || [] };
       list[idx] = updated;
       await persist();
       return updated;
@@ -202,7 +213,8 @@ function createJsonStore() {
       const list = await ensureLoaded();
       const idx = list.findIndex((m) => m.id === id && m.ownerId === ownerId);
       if (idx === -1) return null;
-      const updated = { ...list[idx], ...patch, id, ownerId };
+      const safe = stripIdentity(patch);
+      const updated = { ...list[idx], ...safe, id, ownerId };
       list[idx] = updated;
       await persist();
       return updated;
@@ -271,9 +283,11 @@ function createMongoStore() {
       return (await this.getByIdAny(r)) || (await this.getByCode(r));
     },
     async updateAccessible(id, userId, patch) {
+      const safe = stripIdentity(patch);
+      delete safe.id;
       const doc = await MeetingModel.findOneAndUpdate(
         { id, $or: [{ ownerId: userId }, { memberIds: userId }] },
-        { $set: { ...patch, id } },
+        { $set: safe },
         { new: true }
       );
       return toPlain(doc);
@@ -342,9 +356,12 @@ function createMongoStore() {
       return toPlain(doc);
     },
     async updateOwned(id, ownerId, patch) {
+      const safe = stripIdentity(patch);
+      delete safe.id;
+      delete safe.ownerId;
       const doc = await MeetingModel.findOneAndUpdate(
         { id, ownerId },
-        { $set: { ...patch, id, ownerId } },
+        { $set: safe },
         { new: true }
       );
       return toPlain(doc);
