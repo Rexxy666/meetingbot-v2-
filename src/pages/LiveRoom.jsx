@@ -1,12 +1,28 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { Check, ChevronDown, Copy, KeyRound, Lock, MoreVertical, ShieldCheck, Users } from "lucide-react";
+import {
+  Check,
+  ChevronDown,
+  Copy,
+  KeyRound,
+  Lock,
+  Mic,
+  MicOff,
+  MonitorUp,
+  MoreVertical,
+  ShieldCheck,
+  Users,
+  Video,
+  VideoOff,
+} from "lucide-react";
 import Avatar from "../components/Avatar.jsx";
 import PainPointsList from "../components/PainPointsList.jsx";
 import InviteModal from "../components/InviteModal.jsx";
 import { formatMeetingCode } from "../components/CreatedInviteModal.jsx";
 import { extractReview } from "../lib/extract.js";
+import { formatTranscriptForAi } from "../lib/meetingsCache.js";
 import { connectSocket } from "../lib/socket.js";
 import { inviteToMeeting } from "../lib/api.js";
+import { useLocalMediaAndStt } from "../hooks/useLocalMediaAndStt.js";
 
 const TYPING_PALETTE = [
   { text: "text-mint-700", bg: "bg-mint-50", dot: "bg-mint-500" },
@@ -18,9 +34,9 @@ const TYPING_PALETTE = [
 ];
 
 const RBAC_ROLES = [
-  { value: "host", label: "Host（上級 / 發起人）", short: "Host", emoji: "👑" },
-  { value: "recorder", label: "Recorder（專職紀錄員）", short: "Recorder", emoji: "📝" },
-  { value: "attendee", label: "Attendee（下級 / 與會者）", short: "Attendee", emoji: "🙋" },
+  { value: "host", label: "Host（上級 / 發起人）", short: "Host", emoji: "" },
+  { value: "recorder", label: "Recorder（專職紀錄員）", short: "Recorder", emoji: "" },
+  { value: "attendee", label: "Attendee（下級 / 與會者）", short: "Attendee", emoji: "" },
 ];
 
 const END_RULES = [
@@ -218,7 +234,7 @@ function MemberActionMenu({
                 onProfile?.(member);
               }}
             >
-              👤 個人資訊
+              個人資訊
             </button>
             <button
               type="button"
@@ -228,7 +244,7 @@ function MemberActionMenu({
                 onReport?.(member);
               }}
             >
-              🚩 舉報成員
+              舉報成員
             </button>
             {canKick && (
               <button
@@ -239,7 +255,7 @@ function MemberActionMenu({
                   onKick?.(member);
                 }}
               >
-                🚫 踢除成員
+                踢除成員
               </button>
             )}
           </div>
@@ -677,7 +693,7 @@ function HostPermissionMatrix({
             >
               {RBAC_ROLES.map((r) => (
                 <option key={r.value} value={r.value}>
-                  {r.emoji} {r.label}
+                  {r.label}
                 </option>
               ))}
             </select>
@@ -731,7 +747,7 @@ function HostPermissionMatrix({
           {isKickPermissionEnabled && (
             <div className="rounded-xl border border-navy-800/8 bg-white/70 px-3 py-2.5">
               <p className="text-sm font-bold text-navy-800 flex items-center gap-1.5">
-                <span aria-hidden>⛔</span> 踢人權限分享（單獨開通）
+                <span aria-hidden></span> 踢人權限分享（單獨開通）
               </p>
               <p className="text-[11px] text-navy-400 mt-0.5 mb-2">
                 勾選後該成員可將他人移出會議（發起人除外）
@@ -763,7 +779,7 @@ function HostPermissionMatrix({
 
           <div className="rounded-xl border border-navy-800/8 bg-white/70 px-3 py-2.5">
             <p className="text-sm font-bold text-navy-800 flex items-center gap-1.5">
-              <span aria-hidden>👥</span> 與會者編輯授權（單獨開通）
+              <span aria-hidden></span> 與會者編輯授權（單獨開通）
             </p>
             <p className="text-[11px] text-navy-400 mt-0.5 mb-2">
               撥動開關即可讓該成員編輯議程筆記（Host 預設永遠可編輯）
@@ -794,7 +810,7 @@ function HostPermissionMatrix({
 
           <div className="rounded-xl border border-navy-800/8 bg-white/70 px-3 py-2.5">
             <p className="text-sm font-bold text-navy-800 flex items-center gap-1.5">
-              <span aria-hidden>🛑</span> 結束會議權限配置
+              <span aria-hidden></span> 結束會議權限配置
             </p>
             <p className="text-[11px] text-navy-400 mt-0.5 mb-2">決定誰能按下「結束會議 → AI 整理」</p>
             <div className="space-y-1.5">
@@ -856,7 +872,9 @@ function HostPermissionMatrix({
 
 /**
  * 進行中會議（LiveMeeting / LiveRoom）
+ * All-in-One：RTC 音視訊網格 + 即時 STT 逐字稿 + 議程共編
  * 精準授權矩陣 + 結束會議規則 + 跨端結束強同步
+ * 會後 AI 以 transcript 為主資料源，經 meetingsCache 避免重複燒 Token
  */
 export default function LiveRoom({ meeting, store, go, social, me, onAgendaChange }) {
   const total = meeting.durationMin * 60;
@@ -972,12 +990,17 @@ export default function LiveRoom({ meeting, store, go, social, me, onAgendaChang
   const [rbacOpen, setRbacOpen] = useState(false);
   const [syncState, setSyncState] = useState("connecting");
   const [syncError, setSyncError] = useState(null);
-  /** 手機分頁：notes | roster | pains */
-  const [mobileTab, setMobileTab] = useState("notes");
+  /** 手機分頁：av | stt | notes | roster | pains */
+  const [mobileTab, setMobileTab] = useState("av");
   /** 手機：與會者頭像展開名單 Modal */
   const [rosterModalOpen, setRosterModalOpen] = useState(false);
   /** 手機：超長會議名稱點擊展開 */
   const [titleModalOpen, setTitleModalOpen] = useState(false);
+
+  /** 即時語音轉文字逐字稿（本機 Web Speech 真實收音） */
+  const [transcript, setTranscript] = useState(() =>
+    Array.isArray(meeting?.transcript) ? meeting.transcript : []
+  );
 
   const [topicNotes, setTopicNotes] = useState(() => {
     if (meeting.topicNotes && Object.keys(meeting.topicNotes).length) return meeting.topicNotes;
@@ -990,10 +1013,43 @@ export default function LiveRoom({ meeting, store, go, social, me, onAgendaChang
   const notesTimer = useRef(null);
   const typingEmitRef = useRef(0);
   const typingPeers = useRef(new Map());
+  const transcriptEndRef = useRef(null);
+  const transcriptScrollRef = useRef(null);
   const topic = agenda[agendaIdx];
 
   const hostName = useMemo(() => resolveHostName(meeting, me), [meeting, me]);
   const currentUserName = String(me?.name || "").trim() || "與會者";
+
+  const appendTranscript = useCallback((row) => {
+    if (!row?.text) return;
+    setTranscript((prev) => {
+      const next = [...prev, row];
+      return next.length > 200 ? next.slice(-200) : next;
+    });
+  }, []);
+
+  const {
+    micOn,
+    camOn,
+    screenSharing,
+    mediaReady,
+    mediaError,
+    sttSupported,
+    sttListening,
+    sttError,
+    interimText,
+    localVideoRef,
+    screenVideoRef,
+    startMedia,
+    toggleMic,
+    toggleCam,
+    toggleScreenShare,
+  } = useLocalMediaAndStt({
+    enabled: meetingStatus !== "ended",
+    speakerName: currentUserName,
+    lang: "zh-TW",
+    onFinalUtterance: appendTranscript,
+  });
 
   /** 將 roster 寫回會議，供會後 Who 認領名單使用（寫入前強制去重） */
   const persistRoster = useCallback(
@@ -1064,6 +1120,32 @@ export default function LiveRoom({ meeting, store, go, social, me, onAgendaChang
     (meeting.attendees || []).forEach((a) => push(typeof a === "string" ? a : a?.name));
     return names;
   }, [hostName, currentUserName, roster, meeting.participants, meeting.attendees]);
+
+  /** 視訊網格：在線與會者佔位（joined 優先，否則用名冊） */
+  const videoParticipants = useMemo(() => {
+    const joined = dedupeRoster(roster).filter((p) => p.status === "joined");
+    const base = joined.length
+      ? joined
+      : memberNames.map((name) => ({ name, status: "joined", id: null }));
+    const meRow = {
+      id: me?.id || "me",
+      name: currentUserName,
+      status: "joined",
+      isSelf: true,
+    };
+    const others = base.filter((p) => normName(p.name) !== normName(currentUserName));
+    return [meRow, ...others].slice(0, 8);
+  }, [roster, memberNames, currentUserName, me?.id]);
+
+  /** 逐字稿自動滾到底部（含即時 interim） */
+  useEffect(() => {
+    const el = transcriptScrollRef.current;
+    if (el) {
+      el.scrollTo({ top: el.scrollHeight, behavior: "smooth" });
+    } else {
+      transcriptEndRef.current?.scrollIntoView({ behavior: "smooth", block: "end" });
+    }
+  }, [transcript, interimText]);
 
   const canEdit =
     (isTrueHost && currentRole === "host") || allowedEditors.includes(currentUserName);
@@ -1726,8 +1808,11 @@ export default function LiveRoom({ meeting, store, go, social, me, onAgendaChang
     if (t.topic && !typingTopics.has(t.topic)) typingTopics.set(t.topic, paletteFor(t.name));
   });
 
-  const buildForReview = () =>
-    agenda.map((t) => (topicNotes[t] || "").trim()).filter(Boolean).join("\n");
+  const buildForReview = () => {
+    const fromTranscript = formatTranscriptForAi(transcript);
+    if (fromTranscript.trim()) return fromTranscript;
+    return agenda.map((t) => (topicNotes[t] || "").trim()).filter(Boolean).join("\n");
+  };
   const buildDisplay = () =>
     agenda
       .map((t) => {
@@ -1744,12 +1829,16 @@ export default function LiveRoom({ meeting, store, go, social, me, onAgendaChang
     const participantNames = memberNames.length
       ? memberNames
       : meeting.participants || [];
+    const transcriptText = formatTranscriptForAi(transcript);
     const review = extractReview(buildForReview(), participantNames);
     setMeetingStatus("ended");
     try {
       await store.updateMeeting(meeting.id, {
         topicNotes,
         notes: buildDisplay(),
+        transcript: transcript.slice(),
+        transcriptText,
+        aiSource: transcriptText.trim() ? "transcript" : "notes",
         status: "done",
         meetingStatus: "ended",
         endedAt: Date.now(),
@@ -1779,8 +1868,9 @@ export default function LiveRoom({ meeting, store, go, social, me, onAgendaChang
           patch: { status: "done", meetingStatus: "ended" },
         });
       }
+      // 讓「交由 Gemini 分析」提示可見片刻，再進會後頁（MeetingSummary + meetingsCache）
+      await new Promise((r) => window.setTimeout(r, 1100));
       setEndConfirmOpen(false);
-      // 交由 MeetingSummary 一次性 Gemini 寫入快取；此處不預呼叫 AI，避免重複燒 Token
       go("post", meeting.id);
     } catch (err) {
       console.error("[LiveRoom] endMeeting", err);
@@ -1797,10 +1887,263 @@ export default function LiveRoom({ meeting, store, go, social, me, onAgendaChang
   };
 
   const mobileTabs = [
-    { id: "notes", label: "議程筆記", icon: "📝" },
-    { id: "roster", label: "與會動態", icon: "👥" },
-    { id: "pains", label: "痛點問題", icon: "⚠️" },
+    { id: "av", label: "音視訊", icon: "" },
+    { id: "stt", label: "逐字稿", icon: "" },
+    { id: "notes", label: "筆記", icon: "" },
+    { id: "roster", label: "與會", icon: "" },
+    { id: "pains", label: "痛點", icon: "" },
   ];
+
+  const rtcControls = (
+    <div className="flex items-center justify-center gap-2 sm:gap-3">
+      <button
+        type="button"
+        onClick={toggleMic}
+        aria-pressed={micOn}
+        title={micOn ? "關閉麥克風" : "開啟麥克風"}
+        className={`inline-flex h-11 w-11 items-center justify-center rounded-full border transition-all active:scale-95 ${
+          micOn
+            ? "bg-mint-500 border-mint-500 text-white shadow-glow"
+            : "bg-navy-800/80 border-navy-700 text-white/80"
+        }`}
+      >
+        {micOn ? <Mic className="h-4 w-4" strokeWidth={2.2} /> : <MicOff className="h-4 w-4" strokeWidth={2.2} />}
+      </button>
+      <button
+        type="button"
+        onClick={toggleCam}
+        aria-pressed={camOn}
+        title={camOn ? "關閉鏡頭" : "開啟鏡頭"}
+        className={`inline-flex h-11 w-11 items-center justify-center rounded-full border transition-all active:scale-95 ${
+          camOn
+            ? "bg-mint-500 border-mint-500 text-white shadow-glow"
+            : "bg-navy-800/80 border-navy-700 text-white/80"
+        }`}
+      >
+        {camOn ? <Video className="h-4 w-4" strokeWidth={2.2} /> : <VideoOff className="h-4 w-4" strokeWidth={2.2} />}
+      </button>
+      <button
+        type="button"
+        onClick={toggleScreenShare}
+        aria-pressed={screenSharing}
+        title={screenSharing ? "停止分享螢幕" : "分享螢幕畫面"}
+        className={`inline-flex h-11 min-w-[2.75rem] items-center justify-center gap-1.5 rounded-full border px-3 transition-all active:scale-95 ${
+          screenSharing
+            ? "bg-sky-500 border-sky-500 text-white shadow-sm"
+            : "bg-navy-800/80 border-navy-700 text-white/80"
+        }`}
+      >
+        <MonitorUp className="h-4 w-4" strokeWidth={2.2} />
+        <span className="text-[11px] font-bold hidden sm:inline">
+          {screenSharing ? "分享中" : "螢幕"}
+        </span>
+      </button>
+    </div>
+  );
+
+  const videoGridPanel = (
+    <div className="flex flex-col min-h-0 h-full bg-gradient-to-b from-navy-900 via-navy-800 to-[#0f1b2d] rounded-3xl border border-white/10 shadow-card overflow-hidden">
+      <div className="flex items-center justify-between gap-2 px-4 py-3 border-b border-white/10 shrink-0">
+        <div className="min-w-0">
+          <p className="text-[11px] font-bold tracking-wide text-mint-300">本機真實媒體</p>
+          <p className="text-xs text-white/55 truncate">
+            {mediaReady ? "鏡頭／麥克風已連線" : "等待權限…"} · {micOn ? "收音中" : "靜音"} ·{" "}
+            {camOn ? "鏡頭開" : "鏡頭關"}
+            {screenSharing ? " · 螢幕分享中" : ""}
+            {sttListening ? " · STT 聆聽中" : ""}
+          </p>
+        </div>
+        <span className="shrink-0 inline-flex items-center gap-1.5 text-[10px] font-bold text-mint-200 bg-mint-500/15 border border-mint-400/20 px-2 py-1 rounded-full">
+          <span className="h-1.5 w-1.5 rounded-full bg-mint-300 animate-pulse" />
+          {camOn || micOn ? "LIVE" : "IDLE"}
+        </span>
+      </div>
+
+      {(mediaError || sttError) && (
+        <div className="px-3 pt-2 shrink-0">
+          <p className="text-[11px] text-coral-200 bg-coral-500/15 border border-coral-400/20 rounded-xl px-3 py-2">
+            {mediaError || sttError}
+            {!mediaReady && (
+              <button
+                type="button"
+                onClick={() => startMedia({ mic: true, cam: true })}
+                className="ml-2 underline font-bold text-white"
+              >
+                重新授權
+              </button>
+            )}
+          </p>
+        </div>
+      )}
+
+      <div className="flex-1 min-h-0 overflow-y-auto p-3 sm:p-4 space-y-2.5">
+        {/* 本機鏡頭：真實 <video> */}
+        <div
+          className={`relative aspect-video rounded-2xl overflow-hidden border bg-navy-950 ${
+            camOn ? "border-mint-400/40 ring-1 ring-mint-400/20" : "border-white/10"
+          }`}
+        >
+          <video
+            ref={localVideoRef}
+            autoPlay
+            playsInline
+            muted
+            className={`absolute inset-0 h-full w-full object-cover scale-x-[-1] ${
+              camOn ? "opacity-100" : "opacity-0"
+            }`}
+          />
+          {!camOn && (
+            <div className="absolute inset-0 flex flex-col items-center justify-center bg-navy-950">
+              <div
+                className={`h-16 w-16 rounded-full ${avatarColor(currentUserName)} flex items-center justify-center text-white text-xl font-black`}
+              >
+                {currentUserName.slice(0, 1)}
+              </div>
+              <p className="mt-2 text-[11px] font-semibold text-white/45">鏡頭已關閉</p>
+            </div>
+          )}
+          <div className="absolute inset-x-0 bottom-0 flex items-center justify-between gap-1 px-2.5 py-1.5 bg-gradient-to-t from-black/70 to-transparent">
+            <span className="text-[11px] font-bold text-white truncate">
+              {currentUserName}（你）
+            </span>
+            {!micOn && (
+              <span className="shrink-0 inline-flex h-5 w-5 items-center justify-center rounded-full bg-coral-500/90 text-white">
+                <MicOff className="h-3 w-3" strokeWidth={2.4} />
+              </span>
+            )}
+          </div>
+        </div>
+
+        {/* 螢幕分享：真實 getDisplayMedia */}
+        {screenSharing && (
+          <div className="relative aspect-video rounded-2xl overflow-hidden border border-sky-400/50 ring-2 ring-sky-400/30 bg-black">
+            <video
+              ref={screenVideoRef}
+              autoPlay
+              playsInline
+              muted
+              className="absolute inset-0 h-full w-full object-contain"
+            />
+            <div className="absolute left-2 top-2 text-[10px] font-bold text-sky-100 bg-sky-500/80 px-2 py-0.5 rounded-full">
+              螢幕分享
+            </div>
+          </div>
+        )}
+
+        {/* 其他與會者：尚無跨端 WebRTC，顯示佔位 */}
+        {videoParticipants.filter((p) => !p.isSelf).length > 0 && (
+          <div className="grid grid-cols-2 gap-2.5">
+            {videoParticipants
+              .filter((p) => !p.isSelf)
+              .map((p) => {
+                const color = avatarColor(p.name);
+                return (
+                  <div
+                    key={p.id || p.name}
+                    className="relative aspect-[4/3] rounded-2xl overflow-hidden border border-white/10 bg-navy-900/80"
+                  >
+                    <div className="absolute inset-0 flex flex-col items-center justify-center bg-gradient-to-br from-navy-700/40 via-navy-900 to-black">
+                      <div
+                        className={`h-12 w-12 rounded-full ${color} flex items-center justify-center text-white text-base font-black ring-1 ring-white/20`}
+                      >
+                        {(p.name || "?").slice(0, 1)}
+                      </div>
+                      <p className="mt-1.5 text-[10px] text-white/40">遠端視訊待接 WebRTC</p>
+                    </div>
+                    <div className="absolute inset-x-0 bottom-0 px-2.5 py-1.5 bg-gradient-to-t from-black/70 to-transparent">
+                      <span className="text-[11px] font-bold text-white truncate">{p.name}</span>
+                    </div>
+                  </div>
+                );
+              })}
+          </div>
+        )}
+      </div>
+
+      <div className="shrink-0 px-3 py-3 border-t border-white/10 bg-black/25 backdrop-blur-md">
+        {rtcControls}
+        <p className="mt-2 text-center text-[10px] text-white/40">
+          本機鏡頭／麥克風／螢幕為真實裝置串流；請允許瀏覽器權限
+        </p>
+      </div>
+    </div>
+  );
+
+  const transcriptWall = (
+    <div className="flex flex-col min-h-0 h-full bg-white border border-navy-800/8 rounded-3xl shadow-card overflow-hidden">
+      <div className="flex items-center justify-between gap-2 px-4 py-3 border-b border-navy-800/6 shrink-0">
+        <div className="min-w-0">
+          <p className="text-sm font-bold text-navy-800">即時語音轉文字</p>
+          <p className="text-[11px] text-navy-400 truncate">
+            {sttSupported
+              ? sttListening
+                ? "Web Speech 正在聽你說話…"
+                : micOn
+                ? "準備辨識中"
+                : "請開啟麥克風以開始 STT"
+              : "此瀏覽器不支援語音辨識（建議 Chrome）"}
+          </p>
+        </div>
+        <span
+          className={`shrink-0 text-[10px] font-bold px-2 py-0.5 rounded-full border ${
+            sttListening
+              ? "text-mint-700 bg-mint-50 border-mint-100"
+              : "text-navy-500 bg-navy-800/5 border-navy-800/10"
+          }`}
+        >
+          {transcript.length} 句
+        </span>
+      </div>
+      <div
+        ref={transcriptScrollRef}
+        className="flex-1 min-h-0 overflow-y-auto px-3.5 py-3 space-y-2.5 scroll-smooth"
+      >
+        {transcript.length === 0 && !interimText ? (
+          <div className="h-full min-h-[160px] flex flex-col items-center justify-center text-center px-4">
+            <p className="text-sm font-bold text-navy-600">對麥克風說話即可產生逐字稿</p>
+            <p className="mt-1 text-xs text-navy-400">
+              使用瀏覽器內建語音辨識（zh-TW），非模擬台詞
+            </p>
+          </div>
+        ) : (
+          <>
+            {transcript.map((row) => {
+              const pal = paletteFor(row.speaker);
+              return (
+                <div
+                  key={row.id}
+                  className={`rounded-2xl border px-3 py-2 ${pal.bg} border-navy-800/5`}
+                >
+                  <div className="flex items-center gap-2 mb-0.5">
+                    <span className="text-[10px] font-bold tabular-nums text-navy-400">
+                      [{row.time}]
+                    </span>
+                    <span className={`text-[11px] font-black ${pal.text}`}>{row.speaker}</span>
+                  </div>
+                  <p className="text-sm text-navy-700 leading-relaxed">{row.text}</p>
+                </div>
+              );
+            })}
+            {interimText ? (
+              <div className="rounded-2xl border border-dashed border-mint-200 bg-mint-50/60 px-3 py-2 opacity-80">
+                <div className="flex items-center gap-2 mb-0.5">
+                  <span className="text-[10px] font-bold text-mint-600">辨識中…</span>
+                  <span className="text-[11px] font-black text-mint-700">{currentUserName}</span>
+                </div>
+                <p className="text-sm text-navy-600 leading-relaxed">{interimText}</p>
+              </div>
+            ) : null}
+          </>
+        )}
+        <div ref={transcriptEndRef} />
+      </div>
+      <div className="shrink-0 px-4 py-2.5 border-t border-navy-800/6 bg-navy-800/[0.015]">
+        <p className="text-[10px] text-navy-400 text-center">
+          結束會議後，完整逐字稿將交由 Gemini 深度結構化分析
+        </p>
+      </div>
+    </div>
+  );
 
   const notesEditor = (
     <>
@@ -1875,7 +2218,7 @@ export default function LiveRoom({ meeting, store, go, social, me, onAgendaChang
           <div className="flex items-center gap-1.5 px-4 md:px-5 py-1.5 border-b border-navy-800/8 bg-navy-800/[0.02] shrink-0">
             <Lock className="h-3.5 w-3.5 text-navy-400" strokeWidth={2.2} />
             <span className="text-[11px] font-semibold text-navy-400">
-              🔒 唯讀狀態（尚未獲得發起人的編輯授權）
+              唯讀狀態（尚未獲得發起人的編輯授權）
             </span>
           </div>
         )}
@@ -1887,7 +2230,7 @@ export default function LiveRoom({ meeting, store, go, social, me, onAgendaChang
           placeholder={
             canEdit
               ? `「${topic}」的討論重點寫在這裡，一行一個。\n多人同時編輯會即時同步，切換議程不會混在一起。`
-              : "🔒 唯讀狀態（尚未獲得發起人的編輯授權）"
+              : "唯讀狀態（尚未獲得發起人的編輯授權）"
           }
           className={`w-full flex-1 min-h-[240px] md:min-h-[360px] md:h-[360px] resize-none px-5 md:px-5 py-4 md:py-4 text-sm leading-relaxed text-navy-800 font-mono placeholder-navy-300 transition-colors ${
             !canEdit
@@ -2017,7 +2360,7 @@ export default function LiveRoom({ meeting, store, go, social, me, onAgendaChang
         </div>
         <div className="bg-navy-800 text-white rounded-2xl px-3 md:px-5 py-2.5 md:py-3.5 shadow-card-hover flex items-center gap-1.5 md:gap-3">
           <span className="text-base md:text-lg shrink-0" aria-hidden>
-            📌
+            
           </span>
 
           {/* 手機：會議名稱限寬截斷，點擊展開完整主題 */}
@@ -2171,6 +2514,12 @@ export default function LiveRoom({ meeting, store, go, social, me, onAgendaChang
 
       {/* ── 手機：單一分頁內容（鎖定一屏，不垂直堆疊） ── */}
       <div className="md:hidden flex-1 min-h-0 flex flex-col">
+        {mobileTab === "av" && (
+          <div className="flex-1 min-h-0 flex flex-col">{videoGridPanel}</div>
+        )}
+        {mobileTab === "stt" && (
+          <div className="flex-1 min-h-0 flex flex-col">{transcriptWall}</div>
+        )}
         {mobileTab === "notes" && (
           <div className="flex-1 min-h-0 bg-white border border-navy-800/8 rounded-3xl shadow-card overflow-hidden flex flex-col">
             {notesEditor}
@@ -2216,13 +2565,23 @@ export default function LiveRoom({ meeting, store, go, social, me, onAgendaChang
         )}
       </div>
 
-      {/* ── 桌機：雙欄原版面 ── */}
-      <div className="hidden md:grid grid-cols-1 lg:grid-cols-[300px_1fr] gap-5">
-        {sidebarPanel}
-        <div className="bg-white border border-navy-800/8 rounded-3xl shadow-card overflow-hidden flex flex-col">
+      {/* ── 桌機：音視訊 + 筆記 + 逐字稿 ── */}
+      <div className="hidden md:grid grid-cols-1 xl:grid-cols-[340px_minmax(0,1fr)_320px] lg:grid-cols-[320px_minmax(0,1fr)] gap-5 items-stretch">
+        <div className="min-h-[520px] h-[min(72vh,720px)] flex flex-col gap-5">
+          <div className="flex-1 min-h-0">{videoGridPanel}</div>
+          <div className="hidden lg:block xl:hidden shrink-0 max-h-[280px] overflow-hidden">
+            {transcriptWall}
+          </div>
+        </div>
+        <div className="bg-white border border-navy-800/8 rounded-3xl shadow-card overflow-hidden flex flex-col min-h-[520px] h-[min(72vh,720px)]">
           {notesEditor}
         </div>
+        <div className="hidden xl:flex flex-col gap-5 min-h-[520px] h-[min(72vh,720px)]">
+          <div className="flex-1 min-h-0">{transcriptWall}</div>
+          <div className="shrink-0 max-h-[42%] overflow-y-auto">{sidebarPanel}</div>
+        </div>
       </div>
+      <div className="hidden lg:block xl:hidden mt-5">{sidebarPanel}</div>
 
       {/* 與會者完整名單毛玻璃 Modal（頭像 +N 點擊） */}
       {rosterModalOpen && (
@@ -2338,13 +2697,25 @@ export default function LiveRoom({ meeting, store, go, social, me, onAgendaChang
               if (!endingMeeting) setEndConfirmOpen(false);
             }}
           />
-          <div className="relative z-10 w-full max-w-sm rounded-2xl border border-white/50 bg-white/90 backdrop-blur-md shadow-card-hover p-5 ring-1 ring-navy-800/10">
+          <div className="relative z-10 w-full max-w-md rounded-2xl border border-white/50 bg-white/90 backdrop-blur-md shadow-card-hover p-5 ring-1 ring-navy-800/10">
             <h3 id="end-meeting-title" className="text-base font-bold text-navy-800">
-              結束會議確認
+              結束會議 → AI 整理
             </h3>
-            <p className="mt-2 text-sm text-navy-600 leading-relaxed">
-              確定要結束本次會議嗎？結束後將全端同步終止並交由 AI 進行結構化總結。
-            </p>
+            {endingMeeting ? (
+              <div className="mt-3 rounded-2xl border border-mint-100 bg-mint-50/80 px-3.5 py-3">
+                <p className="text-sm font-semibold text-mint-800 leading-relaxed animate-pulse">
+                  正在將整場會議的語音逐字稿交由 Gemini 進行深度結構化分析…
+                </p>
+                <p className="mt-1.5 text-[11px] text-mint-700/80">
+                  已擷取 {transcript.length} 句即時轉寫，分析完成後寫入快取避免重複燒 Token。
+                </p>
+              </div>
+            ) : (
+              <p className="mt-2 text-sm text-navy-600 leading-relaxed">
+                確定要結束本次會議嗎？結束後將全端同步終止，並以本場完整語音轉文字逐字稿
+                （目前 {transcript.length} 句）交由 Gemini 進行深度結構化分析。
+              </p>
+            )}
             <div className="mt-5 flex items-center justify-end gap-2">
               <button
                 type="button"
@@ -2360,7 +2731,7 @@ export default function LiveRoom({ meeting, store, go, social, me, onAgendaChang
                 onClick={endMeeting}
                 className="rounded-xl px-4 py-2 text-sm font-semibold text-white bg-coral-500 hover:bg-coral-600 shadow-sm transition-colors disabled:opacity-60 active:scale-[0.98]"
               >
-                {endingMeeting ? "結束中…" : "確定結束"}
+                {endingMeeting ? "分析準備中…" : "確定結束"}
               </button>
             </div>
           </div>

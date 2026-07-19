@@ -8,13 +8,14 @@ import MeetingSummary from "./pages/MeetingSummary.jsx";
 import Todo from "./pages/Todo.jsx";
 import Friends from "./pages/Friends.jsx";
 import ProfilePage from "./pages/ProfilePage.jsx";
-import SettingsModal from "./components/SettingsModal.jsx";
+import SettingsPage from "./pages/SettingsPage.jsx";
 import FloatingMeetingWidget from "./components/FloatingMeetingWidget.jsx";
 import BottomNav from "./components/BottomNav.jsx";
 import { useAuth } from "./lib/auth.js";
 import { useMeetings } from "./lib/store.js";
 import { useSocial } from "./lib/social.js";
 import { useMode } from "./lib/settings.js";
+import { useTheme } from "./lib/theme.js";
 import * as api from "./lib/api.js";
 
 function parseLiveHash() {
@@ -28,7 +29,7 @@ export default function App() {
   const [page, setPage] = useState("dashboard");
   const [activeId, setActiveId] = useState(null);
   const [mode, setMode] = useMode();
-  const [settingsOpen, setSettingsOpen] = useState(false);
+  const theme = useTheme();
   const [joinError, setJoinError] = useState(null);
   const [liveAgendaIdx, setLiveAgendaIdx] = useState(0);
   const store = useMeetings(auth.isAuthenticated);
@@ -143,7 +144,7 @@ export default function App() {
           user={auth.user}
           mode={mode}
           onOpenProfile={() => setPage("profile")}
-          onOpenSettings={() => setSettingsOpen(true)}
+          onOpenSettings={() => setPage("settings")}
           onLogout={() => {
             auth.logout();
             setPage("dashboard");
@@ -151,18 +152,6 @@ export default function App() {
           }}
         />
       </div>
-
-      {settingsOpen && (
-        <SettingsModal
-          user={auth.user}
-          mode={mode}
-          onSave={({ name, mode: nextMode }) => {
-            if (name && name !== auth.user?.name) auth.updateProfile({ name });
-            setMode(nextMode);
-          }}
-          onClose={() => setSettingsOpen(false)}
-        />
-      )}
 
       {joinError && (
         <div className="max-w-7xl mx-auto px-6 pt-4">
@@ -200,6 +189,21 @@ export default function App() {
               mode={mode}
               meetings={meetings}
               friends={social.friends}
+              go={go}
+            />
+          )}
+          {page === "settings" && (
+            <SettingsPage
+              user={auth.user}
+              mode={mode}
+              setMode={setMode}
+              updateProfile={auth.updateProfile}
+              theme={theme}
+              onLogout={() => {
+                auth.logout();
+                setPage("dashboard");
+                setActiveId(null);
+              }}
               go={go}
             />
           )}

@@ -5,6 +5,78 @@
 body {
   background: #f7fafb;
   -webkit-font-smoothing: antialiased;
+  transition: background-color 0.3s ease;
+}
+
+/* ============================================================================
+   深色主題（.dark 由 useTheme 掛在 <html>）
+   放在 @layer base 當「基準皮膚」——不用 !important，好讓各組件的 dark: 類別
+   （在 utilities 層、排序在後）能優雅覆寫，達成像素級的對比控制。
+   薄荷綠 / 珊瑚橘等主色維持不變，作為亮點。
+   ========================================================================== */
+html.dark {
+  color-scheme: dark;
+}
+
+@layer base {
+  .dark body {
+    background: #0b1220;
+  }
+
+  /* 表面 */
+  .dark .bg-white {
+    background-color: #131d2f;
+  }
+  .dark .bg-gray-50 {
+    background-color: #18233a;
+  }
+  .dark .bg-gray-100 {
+    background-color: #1e2b45;
+  }
+  /* 半透明白（毛玻璃面板、下拉、導覽列）*/
+  .dark [class*="bg-white/"] {
+    background-color: rgba(19, 29, 47, 0.72);
+  }
+
+  /* 邊框：一律提亮到可見，checkbox / 卡片在暗底不再隱形 */
+  .dark .border-gray-100 {
+    border-color: rgba(255, 255, 255, 0.1);
+  }
+  .dark .border-gray-200 {
+    border-color: rgba(255, 255, 255, 0.14);
+  }
+  .dark .border-gray-300 {
+    border-color: rgba(255, 255, 255, 0.34);
+  }
+  .dark [class*="border-navy-800/"] {
+    border-color: rgba(255, 255, 255, 0.14);
+  }
+
+  /* 文字：主標亮（≈slate-100）、描述小字不低於 slate-400 */
+  .dark .text-navy-800 {
+    color: #f1f5f9;
+  }
+  .dark .text-navy-700 {
+    color: #e2e8f0;
+  }
+  .dark .text-navy-600 {
+    color: #cbd5e1;
+  }
+  .dark .text-navy-500 {
+    color: #aab4c5;
+  }
+  .dark .text-navy-400 {
+    color: #94a3b8;
+  }
+  .dark .text-navy-300 {
+    color: #8593a8;
+  }
+
+  /* 原本就深底的區塊 */
+  .dark .bg-navy-800,
+  .dark .bg-navy-900 {
+    background-color: #0f1a2c;
+  }
 }
 
 /* 隱藏水平捲軸（統計橫向滾動用）*/

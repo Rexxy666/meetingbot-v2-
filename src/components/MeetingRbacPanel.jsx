@@ -14,9 +14,9 @@ import { ShieldCheck, Users, ChevronDown } from "lucide-react";
    ════════════════════════════════════════════════════════════════════════ */
 
 export const RBAC_ROLES = [
-  { value: "host", label: "Host（上級 / 發起人）", short: "Host 上級", emoji: "👑" },
-  { value: "recorder", label: "Recorder（專職紀錄員）", short: "Recorder 紀錄", emoji: "📝" },
-  { value: "attendee", label: "Attendee（下級 / 與會者）", short: "Attendee 與會", emoji: "🙋" },
+  { value: "host", label: "Host（上級 / 發起人）", short: "Host 上級", emoji: "" },
+  { value: "recorder", label: "Recorder（專職紀錄員）", short: "Recorder 紀錄", emoji: "" },
+  { value: "attendee", label: "Attendee（下級 / 與會者）", short: "Attendee 與會", emoji: "" },
 ];
 
 const roleMeta = (value) => RBAC_ROLES.find((r) => r.value === value) || RBAC_ROLES[0];
@@ -60,7 +60,7 @@ function Controls({ role, setRole, edit, setEdit, hostAssign, setHostAssign }) {
           >
             {RBAC_ROLES.map((r) => (
               <option key={r.value} value={r.value}>
-                {r.emoji} {r.label}
+                {r.label}
               </option>
             ))}
           </select>
@@ -179,7 +179,7 @@ export default function MeetingRbacPanel({
         >
           <ShieldCheck className="h-4 w-4 text-mint-600" strokeWidth={2.2} />
           <span className="hidden sm:inline">權限</span>
-          <span>{meta.emoji}</span>
+          <span className="text-navy-500">{roleMeta(role).short}</span>
           <ChevronDown
             className={`h-3.5 w-3.5 text-navy-400 transition-transform ${open ? "rotate-180" : ""}`}
             strokeWidth={2.4}

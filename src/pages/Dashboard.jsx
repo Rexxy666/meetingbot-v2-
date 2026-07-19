@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import {
   ArrowRight,
+  CalendarDays,
   CalendarOff,
   Check,
   MoreHorizontal,
@@ -10,6 +11,7 @@ import {
 } from "lucide-react";
 import { API_BASE, joinMeetingByLink } from "../lib/api.js";
 import { getMode } from "../config/meetingConfig.js";
+import { useTheme } from "../lib/theme.js";
 
 const CARD = "bg-white border border-gray-100 shadow-sm rounded-2xl";
 
@@ -41,21 +43,45 @@ function parseJoinCode(raw) {
   return s.replace(/\s|-/g, "");
 }
 
-function StatusBadge({ status }) {
+function StatusBadge({ status, isDark }) {
   if (status === "live") {
     return (
-      <span className="shrink-0 inline-flex items-center gap-1.5 text-[11px] font-semibold text-coral-500 bg-coral-50 border border-coral-100 px-2 py-0.5 rounded-full">
+      <span
+        className={`shrink-0 inline-flex items-center gap-1.5 text-[11px] font-semibold px-2 py-0.5 rounded-full border ${
+          isDark
+            ? "bg-emerald-950/40 text-emerald-400 border-emerald-500/20"
+            : "text-coral-500 bg-coral-50 border-coral-100"
+        }`}
+      >
         <span className="relative flex h-1.5 w-1.5">
-          <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-coral-400 opacity-75" />
-          <span className="relative inline-flex rounded-full h-1.5 w-1.5 bg-coral-500 animate-pulse" />
+          <span
+            className={`animate-ping absolute inline-flex h-full w-full rounded-full opacity-75 ${
+              isDark ? "bg-emerald-400/70" : "bg-coral-400"
+            }`}
+          />
+          <span
+            className={`relative inline-flex rounded-full h-1.5 w-1.5 animate-pulse ${
+              isDark ? "bg-emerald-400" : "bg-coral-500"
+            }`}
+          />
         </span>
         進行中
       </span>
     );
   }
   const map = {
-    ready: { t: "已就緒", c: "text-mint-700 bg-mint-50 border-mint-100" },
-    done: { t: "已完成", c: "text-navy-500 bg-gray-50 border-gray-100" },
+    ready: {
+      t: "已就緒",
+      c: isDark
+        ? "bg-emerald-950/40 text-emerald-400 border-emerald-500/20"
+        : "text-mint-700 bg-mint-50 border-mint-100",
+    },
+    done: {
+      t: "已完成",
+      c: isDark
+        ? "bg-slate-800/60 text-slate-400 border-slate-600/40"
+        : "text-navy-500 bg-gray-50 border-gray-100",
+    },
   };
   const s = map[status] || map.ready;
   return (
@@ -112,7 +138,7 @@ function DeleteConfirmModal({ busy, onCancel, onConfirm }) {
   );
 }
 
-function MeetingCard({ m, go, onDelete, me }) {
+function MeetingCard({ m, go, onDelete, me, isDark }) {
   const isOwner = !me || m.ownerId === me.id;
   const isLive = m.status === "live";
   const canShowMore = isOwner && !isLive;
@@ -162,41 +188,84 @@ function MeetingCard({ m, go, onDelete, me }) {
   };
 
   const btnCls = isLive
-    ? "bg-coral-500 text-white hover:bg-coral-600 shadow-sm"
+    ? isDark
+      ? "bg-slate-800 text-slate-100 border border-slate-600 shadow-none hover:bg-slate-800 hover:border-cyan-500/50 hover:text-white"
+      : "bg-coral-500 text-white hover:bg-coral-600 shadow-sm"
+    : isDark
+    ? "bg-slate-800 text-slate-200 border border-slate-600 hover:border-cyan-500/50 hover:text-white"
     : "border border-gray-100 bg-white text-navy-700 hover:border-navy-800/15";
 
   return (
     <>
       <article
         className={`group flex items-center gap-3 md:gap-4 p-3.5 md:p-4 transition-all duration-200 hover:shadow-md ${CARD} ${
-          isLive ? "ring-1 ring-coral-100" : ""
+          isLive ? (isDark ? "ring-1 ring-slate-600/50" : "ring-1 ring-coral-100") : ""
         }`}
       >
         <div
           className={`shrink-0 h-10 w-10 rounded-xl flex items-center justify-center text-base border border-gray-100 ${
-            isLive ? "bg-coral-50" : m.status === "done" ? "bg-gray-50" : "bg-mint-50"
+            isLive
+              ? isDark
+                ? "bg-slate-800 border-slate-600"
+                : "bg-coral-50"
+              : m.status === "done"
+              ? isDark
+                ? "bg-slate-800/60 border-slate-600/50"
+                : "bg-gray-50"
+              : isDark
+              ? "bg-slate-800 border-slate-600/50"
+              : "bg-mint-50"
           }`}
         >
-          {m.scenarioEmoji || "📅"}
+          <CalendarDays
+            className={`h-5 w-5 ${
+              isLive
+                ? isDark
+                  ? "text-slate-300"
+                  : "text-coral-500"
+                : m.status === "done"
+                ? isDark
+                  ? "text-slate-400"
+                  : "text-navy-400"
+                : isDark
+                ? "text-slate-300"
+                : "text-mint-600"
+            }`}
+            strokeWidth={1.8}
+          />
         </div>
 
         <div className="min-w-0 flex-1">
           <div className="flex items-center gap-2 min-w-0">
-            <p className="font-semibold text-navy-800 truncate">{m.title}</p>
-            <StatusBadge status={m.status} />
+            <p className={`font-semibold truncate ${isDark ? "text-white" : "text-navy-800"}`}>
+              {m.title}
+            </p>
+            <StatusBadge status={m.status} isDark={isDark} />
           </div>
           <div className="mt-1 flex items-center gap-1.5 flex-wrap min-w-0">
             {m.scenarioLabel && (
-              <span className="text-[11px] font-medium text-navy-500 border border-gray-100 px-1.5 py-0.5 rounded-md">
+              <span
+                className={`text-[11px] font-medium border px-1.5 py-0.5 rounded-md ${
+                  isDark
+                    ? "text-slate-300 border-slate-600/50"
+                    : "text-navy-500 border-gray-100"
+                }`}
+              >
                 {m.scenarioLabel}
               </span>
             )}
             {!isOwner && (
-              <span className="text-[11px] font-medium text-sky-600 border border-sky-100 bg-sky-50 px-1.5 py-0.5 rounded-md">
+              <span
+                className={`text-[11px] font-medium border px-1.5 py-0.5 rounded-md ${
+                  isDark
+                    ? "text-sky-300 bg-sky-950/40 border-sky-500/25"
+                    : "text-sky-600 border-sky-100 bg-sky-50"
+                }`}
+              >
                 受邀協作
               </span>
             )}
-            <span className="text-xs text-navy-400 truncate">
+            <span className={`text-xs truncate ${isDark ? "text-slate-400" : "text-navy-400"}`}>
               {m.durationMin} 分鐘 · 目標 {(m.goals || []).length} 項
               {m.status === "done" && openDone > 0 ? ` · ${openDone} 項待辦` : ""}
             </span>
@@ -211,7 +280,11 @@ function MeetingCard({ m, go, onDelete, me }) {
               aria-expanded={menuOpen}
               aria-label="更多操作"
               onClick={() => setMenuOpen((v) => !v)}
-              className="text-navy-300 hover:text-navy-600 hover:bg-gray-50 transition-colors p-1.5 rounded-lg"
+              className={`transition-colors p-1.5 rounded-lg ${
+                isDark
+                  ? "text-slate-400 hover:text-slate-200 hover:bg-slate-800/80"
+                  : "text-navy-300 hover:text-navy-600 hover:bg-gray-50"
+              }`}
             >
               <MoreHorizontal className="h-5 w-5" strokeWidth={1.8} />
             </button>
@@ -224,7 +297,11 @@ function MeetingCard({ m, go, onDelete, me }) {
                   type="button"
                   role="menuitem"
                   onClick={requestDelete}
-                  className="w-full flex items-center gap-2 text-left px-3.5 py-2.5 text-sm font-medium text-coral-500 hover:bg-coral-50 transition-colors"
+                  className={`w-full flex items-center gap-2 text-left px-3.5 py-2.5 text-sm font-medium transition-colors ${
+                    isDark
+                      ? "text-coral-300 hover:bg-coral-950/40"
+                      : "text-coral-500 hover:bg-coral-50"
+                  }`}
                 >
                   <Trash2 className="h-4 w-4" strokeWidth={1.8} />
                   刪除會議紀錄
@@ -564,6 +641,8 @@ function JoinAndCreate({ go, onJoined }) {
 export default function Dashboard({ store, go, me, mode = "enterprise" }) {
   const { meetings, deleteMeeting, updateMeeting, refreshMeetings, loading, error, setMeetings } = store;
   const modeInfo = getMode(mode);
+  const { resolved: themeResolved } = useTheme();
+  const isDark = themeResolved === "dark";
   const [completingKeys, setCompletingKeys] = useState(() => new Set());
   const [collapsingKeys, setCollapsingKeys] = useState(() => new Set());
 
@@ -708,7 +787,6 @@ export default function Dashboard({ store, go, me, mode = "enterprise" }) {
                   你的會議
                 </h1>
                 <span className="inline-flex items-center gap-1 text-[11px] font-medium text-navy-500 border border-gray-100 bg-white px-2 py-0.5 rounded-full">
-                  <span aria-hidden="true">{modeInfo.emoji}</span>
                   {modeInfo.label}
                 </span>
               </div>
@@ -750,6 +828,7 @@ export default function Dashboard({ store, go, me, mode = "enterprise" }) {
                           go={go}
                           onDelete={deleteMeeting}
                           me={me}
+                          isDark={isDark}
                         />
                       </div>
                     ))}
@@ -764,6 +843,7 @@ export default function Dashboard({ store, go, me, mode = "enterprise" }) {
                         go={go}
                         onDelete={deleteMeeting}
                         me={me}
+                        isDark={isDark}
                       />
                     ))}
                   </div>

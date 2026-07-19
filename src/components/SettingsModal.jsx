@@ -23,7 +23,7 @@ export default function SettingsModal({ user, mode, onSave, onClose }) {
       <div className="absolute inset-0 bg-navy-900/30 backdrop-blur-sm" />
       <div className="relative w-full max-w-md bg-white rounded-3xl shadow-card-hover p-6 fade-in" onClick={(e) => e.stopPropagation()}>
         <div className="flex items-center justify-between">
-          <h3 className="text-lg font-black text-navy-800">⚙️ 個人設定</h3>
+          <h3 className="text-lg font-black text-navy-800">個人設定</h3>
           <button onClick={onClose} className="text-navy-300 hover:text-navy-700 transition-colors">
             <svg viewBox="0 0 24 24" className="h-5 w-5" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round"><path d="M18 6L6 18M6 6l12 12" /></svg>
           </button>
@@ -61,7 +61,6 @@ export default function SettingsModal({ user, mode, onSave, onClose }) {
                   className={`flex flex-col items-start gap-1 rounded-2xl border p-4 transition-all active:scale-[0.98]
                     ${active ? "bg-mint-50 border-mint-300 shadow-glow" : "bg-white border-navy-800/10 hover:border-mint-200"}`}
                 >
-                  <span className="text-2xl">{m.emoji}</span>
                   <span className={`font-black ${active ? "text-mint-700" : "text-navy-800"}`}>{m.label}</span>
                 </button>
               );

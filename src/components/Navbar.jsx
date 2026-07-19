@@ -42,7 +42,7 @@ function UserMenu({ user, mode, onOpenProfile, onOpenSettings, onLogout }) {
               <p className="text-sm font-semibold text-navy-800 truncate">{user?.name || "使用者"}</p>
               <p className="text-[11px] text-navy-400 truncate mt-0.5">{user?.email}</p>
               <p className="mt-2 text-[11px] text-navy-400">
-                {modeInfo.emoji} {modeInfo.label}
+                {modeInfo.label}
               </p>
             </div>
             <div className="h-px bg-gray-100 my-1" />

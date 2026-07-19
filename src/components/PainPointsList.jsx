@@ -20,7 +20,7 @@ export default function PainPointsList({ pains, compact = false, className = "" 
   return (
     <div className={`bg-coral-50 border border-coral-100 rounded-2xl px-5 py-3.5 ${className}`}>
       <p className="text-xs font-bold text-coral-600 flex items-center gap-1.5">
-        <span>🔥</span> 要解決的痛點與問題
+        要解決的痛點與問題
       </p>
       <ul className="mt-2.5 space-y-2">
         {pains.map((p, i) => (

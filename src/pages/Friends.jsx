@@ -163,7 +163,6 @@ export default function Friends({ social, store, go, me }) {
           <div className="space-y-2">
             {invites.map((inv) => (
               <div key={inv.id} className="flex items-center gap-3 bg-mint-50 border border-mint-200 rounded-2xl px-4 py-3">
-                <span className="text-xl">{inv.meeting?.scenarioEmoji || "📅"}</span>
                 <div className="min-w-0 flex-1">
                   <p className="font-semibold text-navy-800 truncate">{inv.meeting?.title}</p>
                   <p className="text-xs text-navy-400 truncate">{inv.from?.name} 邀請你加入協作</p>
@@ -219,8 +218,7 @@ export default function Friends({ social, store, go, me }) {
       <SectionTitle>我的好友（{friends.length}）</SectionTitle>
       {friends.length === 0 ? (
         <div className="border-2 border-dashed border-navy-800/10 rounded-3xl py-12 text-center">
-          <div className="text-3xl">👥</div>
-          <p className="mt-2 font-bold text-navy-700">還沒有好友</p>
+          <p className="font-bold text-navy-700">還沒有好友</p>
           <p className="text-sm text-navy-400 mt-1">用上方搜尋加好友，之後就能一鍵邀請進會議。</p>
         </div>
       ) : (

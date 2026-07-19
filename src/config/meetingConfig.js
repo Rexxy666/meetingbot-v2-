@@ -21,13 +21,13 @@ function finalize(blocks, warns, checks) {
   return { level, reasons: blocks.length ? blocks : warns, checks };
 }
 
-// ── 🏢 企業模式 ──────────────────────────────────────────────────────────────
+// ── 企業模式 ──────────────────────────────────────────────────────────────
 const ENTERPRISE = [
   {
     id: "client",
     label: "對客戶",
     en: "B2B Client Meeting",
-    emoji: "🤝",
+    emoji: "",
     tagline: "對外拜訪・商務洽談",
     primaryListKey: "outcomes",
     linkKeys: ["deckLink"],
@@ -63,7 +63,7 @@ const ENTERPRISE = [
     id: "topdown",
     label: "上對下佈達",
     en: "Top-Down Alignment",
-    emoji: "📢",
+    emoji: "",
     tagline: "指示・目標佈達",
     primaryListKey: "directives",
     linkKeys: [],
@@ -97,7 +97,7 @@ const ENTERPRISE = [
     id: "bottomup",
     label: "向上匯報",
     en: "Bottom-Up Progress Review",
-    emoji: "📈",
+    emoji: "",
     tagline: "進度回報・請求決策",
     primaryListKey: "progress",
     linkKeys: ["prereadLink"],
@@ -129,7 +129,7 @@ const ENTERPRISE = [
     id: "crossdept",
     label: "跨部門同步",
     en: "Cross-Functional Sync",
-    emoji: "⚙️",
+    emoji: "",
     tagline: "專案 Kick-off・進度對齊・防互相甩鍋",
     primaryListKey: "alignItems",
     linkKeys: ["boardLink"],
@@ -164,7 +164,7 @@ const ENTERPRISE = [
     id: "brainstorm",
     label: "腦力激盪",
     en: "Brainstorming & Sync",
-    emoji: "💡",
+    emoji: "",
     tagline: "跨部門發散・決策",
     primaryListKey: "topics",
     linkKeys: ["prereadLink"],
@@ -174,8 +174,8 @@ const ENTERPRISE = [
       { key: "participants", type: "participants", label: "跨部門成員", placeholder: "與會者，按 Enter", required: false },
       { key: "topics", type: "list", ordered: true, label: "要發散 / 決策的議題", placeholder: "例：命名方向有哪些選項？", required: true, hint: "逐條新增" },
       { key: "mode", type: "choice", label: "期望產出", required: true, options: [
-        { value: "diverge", label: "🌱 發散更多想法" },
-        { value: "converge", label: "🎯 收斂做出決策" },
+        { value: "diverge", label: "發散更多想法" },
+        { value: "converge", label: "收斂做出決策" },
       ] },
       { key: "decisionMaker", type: "text", label: "最終決策者 (DRI)", placeholder: "誰負責拍板？例：Rex", required: true, hint: "避免無人決策" },
       { key: "prereadLink", type: "link", label: "背景資料連結", placeholder: "選填，供會前閱讀", required: false },
@@ -201,7 +201,7 @@ const ENTERPRISE = [
     id: "oneonone",
     label: "1-on-1 訪談",
     en: "1-on-1 Coaching",
-    emoji: "👥",
+    emoji: "",
     tagline: "主管下屬談心・績效與職涯發展",
     primaryListKey: "talkPoints",
     linkKeys: [],
@@ -235,7 +235,7 @@ const ENTERPRISE = [
     id: "retro",
     label: "復盤檢討會",
     en: "Project Retrospective",
-    emoji: "🔄",
+    emoji: "",
     tagline: "專案結束檢討・防抓戰犯・聚焦行動優化",
     primaryListKey: "actions",
     linkKeys: ["retroDoc"],
@@ -268,7 +268,7 @@ const ENTERPRISE = [
     id: "qbr",
     label: "客戶成功 QBR",
     en: "Customer Success QBR",
-    emoji: "👑",
+    emoji: "",
     tagline: "定期季度業務回顧・售後維護",
     primaryListKey: "valueWins",
     linkKeys: ["qbrDeck"],
@@ -304,14 +304,14 @@ const ENTERPRISE = [
   },
 ];
 
-// ── 🎓 學生模式（分組報告 / 專題製作）─────────────────────────────────────────
+// ── 學生模式（分組報告 / 專題製作）─────────────────────────────────────────
 const STUDENT = [
   // 場景一：期初分工與主題對焦（對應「對客戶」）
   {
     id: "kickoff",
     label: "期初分工",
     en: "Kickoff & Topic Focus",
-    emoji: "🤝",
+    emoji: "",
     tagline: "主題對焦・認領任務",
     primaryListKey: "decisions",
     linkKeys: ["rubricLink"],
@@ -348,7 +348,7 @@ const STUDENT = [
     id: "assemble",
     label: "進度拼湊",
     en: "Assemble & Align",
-    emoji: "📢",
+    emoji: "",
     tagline: "組裝報告・對齊邏輯",
     primaryListKey: "sections",
     linkKeys: ["draftLink"],
@@ -385,7 +385,7 @@ const STUDENT = [
     id: "rehearsal",
     label: "上台彩排",
     en: "Final Rehearsal",
-    emoji: "📈",
+    emoji: "",
     tagline: "抓時間・對口條",
     primaryListKey: "segments",
     linkKeys: ["slidesLink"],
@@ -425,7 +425,7 @@ const STUDENT = [
     id: "ideate",
     label: "腦力激盪",
     en: "Free Brainstorming",
-    emoji: "💡",
+    emoji: "",
     tagline: "專題發想・創意討論",
     primaryListKey: "topics",
     linkKeys: ["refLink"],
@@ -435,8 +435,8 @@ const STUDENT = [
       { key: "participants", type: "participants", label: "組員", placeholder: "輸入組員姓名，按 Enter", required: false },
       { key: "topics", type: "list", ordered: true, label: "要發想的問題 / 方向", placeholder: "例：有哪些題目選項？", required: true, hint: "逐條新增" },
       { key: "mode", type: "choice", label: "期望產出", required: true, options: [
-        { value: "diverge", label: "🌱 發散更多點子" },
-        { value: "converge", label: "🎯 收斂選定方向" },
+        { value: "diverge", label: "發散更多點子" },
+        { value: "converge", label: "收斂選定方向" },
       ] },
       { key: "recorder", type: "text", label: "記錄長（誰整理結論）", placeholder: "誰負責把結論記下來？例：Amy", required: true, hint: "避免發想完什麼都沒留下" },
       { key: "refLink", type: "link", label: "參考靈感連結", placeholder: "選填，範例 / 參考資料", required: false },
@@ -478,11 +478,11 @@ export const MODES = {
   enterprise: {
     id: "enterprise",
     label: "企業模式",
-    emoji: "🏢",
+    emoji: "",
     scenarios: ENTERPRISE,
     scenarioTabs: ENTERPRISE_SCENARIO_TABS,
   },
-  student: { id: "student", label: "學生模式", emoji: "🎓", scenarios: STUDENT },
+  student: { id: "student", label: "學生模式", emoji: "", scenarios: STUDENT },
 };
 
 export const MODE_LIST = [MODES.enterprise, MODES.student];

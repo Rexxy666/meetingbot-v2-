@@ -3,6 +3,11 @@ import { ChevronDown, Lock } from "lucide-react";
 import Avatar from "../components/Avatar.jsx";
 import PainPointsList from "../components/PainPointsList.jsx";
 import { extractReview } from "../lib/extract.js";
+import {
+  formatTranscriptForAi,
+  getCachedSummary,
+  setCachedSummary,
+} from "../lib/meetingsCache.js";
 import * as api from "../lib/api.js";
 
 const uid = () =>
@@ -81,7 +86,7 @@ function AICard({ tone, icon, title, items, empty, loading }) {
   return (
     <div className={`border rounded-3xl p-5 ${map[tone]}`}>
       <p className="font-black text-navy-800 flex items-center gap-2">
-        {icon} {title}
+        {title}
       </p>
       {loading ? (
         <SkeletonBlock lines={3} />
@@ -284,12 +289,27 @@ export default function MeetingSummary({
     [meeting.topicNotes]
   );
 
+  /** 優先使用完整語音逐字稿；無 STT 時才退回手寫筆記 */
   const notesForAi = useMemo(() => {
+    const fromSaved =
+      String(meeting.transcriptText || "").trim() ||
+      formatTranscriptForAi(meeting.transcript || []);
+    if (fromSaved) return fromSaved;
     if (topicEntries.length) {
       return topicEntries.map(([t, text]) => `【${t}】\n${text}`).join("\n\n");
     }
     return meeting.notes || "";
-  }, [meeting.notes, topicEntries]);
+  }, [meeting.notes, meeting.transcript, meeting.transcriptText, topicEntries]);
+
+  const aiSourceLabel = useMemo(() => {
+    if (
+      String(meeting.transcriptText || "").trim() ||
+      (Array.isArray(meeting.transcript) && meeting.transcript.length)
+    ) {
+      return "語音逐字稿";
+    }
+    return "手寫筆記";
+  }, [meeting.transcript, meeting.transcriptText]);
 
   /** 完整候選人：Host + participants + attendees（去重，Host 置頂） */
   const allPeople = useMemo(() => {
@@ -354,11 +374,21 @@ export default function MeetingSummary({
 
   const generateSummary = useCallback(async () => {
     setIsLoading(true);
-    setStatusMsg("AI 正在精簡萃取會議筆記…");
+    setStatusMsg("正在將整場會議的語音逐字稿交由 Gemini 進行深度結構化分析…");
     try {
       // 進頁時補寫 Host 名稱，避免之後其他裝置漏掉創辦人
       if (hostName && hostName !== meeting.ownerName) {
         await store.updateMeeting(meeting.id, { ownerName: hostName });
+      }
+
+      const cached = getCachedSummary(meeting.id, notesForAi);
+      if (cached?.review && cached?.actions) {
+        await store.updateMeeting(meeting.id, {
+          review: cached.review,
+          actions: cached.actions,
+        });
+        setStatusMsg(cached.message || `已使用快取（來源：${aiSourceLabel}）`);
+        return;
       }
 
       const prevActions = meeting.actions || [];
@@ -369,21 +399,32 @@ export default function MeetingSummary({
         mode,
       });
       const shaped = toStoreShape(result, prevActions);
+      setCachedSummary(meeting.id, notesForAi, {
+        review: shaped.review,
+        actions: shaped.actions,
+        message: result.message || "分析完成",
+      });
       await store.updateMeeting(meeting.id, {
         review: shaped.review,
         actions: shaped.actions,
       });
-      setStatusMsg(result.message || "分析完成");
+      setStatusMsg(result.message || `分析完成（來源：${aiSourceLabel}）`);
     } catch (err) {
       console.error("[MeetingSummary]", err);
       try {
         const fallback = extractReview(notesForAi, allPeople);
+        const actions = (fallback.actions || []).map((a) => ({
+          ...a,
+          who: "",
+        }));
+        setCachedSummary(meeting.id, notesForAi, {
+          review: fallback,
+          actions,
+          message: "離線備援摘要",
+        });
         await store.updateMeeting(meeting.id, {
           review: fallback,
-          actions: (fallback.actions || []).map((a) => ({
-            ...a,
-            who: "",
-          })),
+          actions,
         });
       } catch {
         /* ignore */
@@ -393,6 +434,7 @@ export default function MeetingSummary({
       setIsLoading(false);
     }
   }, [
+    aiSourceLabel,
     allPeople,
     hostName,
     meeting.actions,
@@ -456,10 +498,10 @@ export default function MeetingSummary({
                   : "bg-navy-800/5 text-navy-500 border-navy-800/10"
               }`}
             >
-              {mode === "student" ? "🎓 學生模式" : "🏢 企業模式"}
+              {mode === "student" ? "學生模式" : "企業模式"}
             </span>
             <span className="text-[10px] font-semibold px-2 py-0.5 rounded-full border border-navy-800/10 bg-white text-navy-500">
-              {currentRole === "host" ? "👑 Host" : "🙋 Attendee"}
+              {currentRole === "host" ? "Host" : "Attendee"}
             </span>
             {isLoading && (
               <span className="text-[10px] font-semibold text-mint-600 bg-mint-50 border border-mint-100 px-2 py-0.5 rounded-full animate-pulse">
@@ -501,21 +543,30 @@ export default function MeetingSummary({
 
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-6 mt-6">
         <div className="self-start bg-white border border-navy-800/8 rounded-3xl shadow-card overflow-hidden">
-          <div className="px-5 py-3.5 border-b border-navy-800/6 flex items-center gap-2 text-sm font-bold text-navy-700">
-            <svg
-              viewBox="0 0 24 24"
-              className="h-4 w-4 text-navy-400"
-              fill="none"
-              stroke="currentColor"
-              strokeWidth="2"
-              strokeLinecap="round"
-              strokeLinejoin="round"
-            >
-              <path d="M14 2H6a2 2 0 00-2 2v16a2 2 0 002 2h12a2 2 0 002-2V8z M14 2v6h6" />
-            </svg>
-            會議原始口語筆記
+          <div className="px-5 py-3.5 border-b border-navy-800/6 flex items-center justify-between gap-2">
+            <div className="flex items-center gap-2 text-sm font-bold text-navy-700">
+              <svg
+                viewBox="0 0 24 24"
+                className="h-4 w-4 text-navy-400"
+                fill="none"
+                stroke="currentColor"
+                strokeWidth="2"
+                strokeLinecap="round"
+                strokeLinejoin="round"
+              >
+                <path d="M14 2H6a2 2 0 00-2 2v16a2 2 0 002 2h12a2 2 0 002-2V8z M14 2v6h6" />
+              </svg>
+              {aiSourceLabel === "語音逐字稿" ? "會議語音逐字稿" : "會議原始口語筆記"}
+            </div>
+            <span className="text-[10px] font-bold text-mint-700 bg-mint-50 border border-mint-100 px-2 py-0.5 rounded-full">
+              AI 來源：{aiSourceLabel}
+            </span>
           </div>
-          {topicEntries.length ? (
+          {aiSourceLabel === "語音逐字稿" && notesForAi.trim() ? (
+            <pre className="px-5 py-4 text-sm text-navy-600 leading-relaxed whitespace-pre-wrap font-sans max-h-[28rem] overflow-y-auto">
+              {notesForAi}
+            </pre>
+          ) : topicEntries.length ? (
             <div className="px-5 py-4 space-y-4">
               {topicEntries.map(([t, text]) => (
                 <div key={t}>
@@ -545,7 +596,7 @@ export default function MeetingSummary({
         <div className="space-y-4">
           <AICard
             tone="blue"
-            icon="💡"
+            icon=""
             title="靈感 / 點子"
             items={review.ideas || []}
             empty="筆記中未偵測到明顯的點子。"
@@ -553,7 +604,7 @@ export default function MeetingSummary({
           />
           <AICard
             tone="green"
-            icon="📌"
+            icon=""
             title="決議事項"
             items={review.decisions || []}
             empty="筆記中未偵測到明確決議。"
@@ -561,7 +612,7 @@ export default function MeetingSummary({
           />
           <AICard
             tone="coral"
-            icon="⚠️"
+            icon=""
             title="潛在風險"
             items={review.risks || []}
             empty="太好了，沒有偵測到明顯風險。"

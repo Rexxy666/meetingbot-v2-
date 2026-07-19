@@ -183,7 +183,7 @@ function TodoRow({
       className={`h-5 w-5 shrink-0 rounded-md border flex items-center justify-center transition-colors ${
         selected
           ? "bg-coral-500 border-coral-500 text-white"
-          : "border-navy-800/15 bg-white hover:border-coral-300"
+          : "border-navy-800/15 bg-white hover:border-coral-300 dark:border-white/40 dark:bg-transparent dark:hover:border-coral-300"
       }`}
     >
       {selected && <Check className="h-3 w-3" strokeWidth={3.2} />}
@@ -232,7 +232,7 @@ function TodoRow({
             className={`h-5 w-5 shrink-0 rounded-full border flex items-center justify-center transition-colors duration-200 ${
               item.completed || completing
                 ? "bg-teal-500 border-teal-500 text-white"
-                : "border-navy-800/20 hover:border-teal-400 bg-white"
+                : "border-navy-800/20 hover:border-teal-400 bg-white dark:border-white/40 dark:bg-transparent dark:hover:border-teal-400"
             }`}
           >
             <Check
@@ -594,8 +594,7 @@ export default function Todo({ meetings, store, go }) {
 
       {shown.length === 0 ? (
         <div className="mt-6 border border-dashed border-gray-200 rounded-3xl py-14 text-center bg-white/60">
-          <div className="text-3xl">✅</div>
-          <p className="mt-3 font-bold text-navy-700">
+          <p className="font-bold text-navy-700">
             {filter === "done" ? "還沒有已完成項目" : filter === "open" ? "還沒有待辦" : "清單是空的"}
           </p>
           <p className="text-sm text-navy-400 mt-1 px-6">

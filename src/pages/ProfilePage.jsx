@@ -87,7 +87,6 @@ export default function ProfilePage({ user, mode, meetings = [], friends = [], g
             <span className="truncate">{email}</span>
           </p>
           <span className="mt-4 inline-flex items-center gap-1.5 rounded-full bg-white/12 backdrop-blur-md border border-white/20 px-3 py-1 text-[11px] font-bold text-mint-200">
-            <span aria-hidden>{modeInfo?.emoji || "🏢"}</span>
             {modeInfo?.label || "企業模式"}
           </span>
         </div>
@@ -104,7 +103,7 @@ export default function ProfilePage({ user, mode, meetings = [], friends = [], g
             <div className="min-w-0 flex-1">
               <p className="text-[11px] font-bold text-navy-400">當前身分</p>
               <p className="text-sm font-semibold text-navy-800">
-                {modeInfo?.emoji} {modeInfo?.label || "企業模式"}
+                {modeInfo?.label || "企業模式"}
               </p>
             </div>
           </li>

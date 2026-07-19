@@ -119,7 +119,7 @@ export default function CreatedInviteModal({
           onClick={() => copyText(shareUrl, "link")}
           className="mt-5 w-full font-bold py-3.5 rounded-2xl bg-mint-500 text-white shadow-[0_8px_24px_rgba(20,184,166,0.25)] hover:bg-mint-600 transition-colors active:scale-[0.99]"
         >
-          {copiedLink ? "✅ 已複製網址！" : "複製專屬會議連結"}
+          {copiedLink ? "已複製網址！" : "複製專屬會議連結"}
         </button>
 
         {typeof onEnterLive === "function" && (

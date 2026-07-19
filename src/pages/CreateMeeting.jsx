@@ -15,6 +15,7 @@ import { getMode, getScenario, getScenariosForTab } from "../config/meetingConfi
 import FriendAttendeePicker from "../components/FriendAttendeePicker.jsx";
 import CreatedInviteModal from "../components/CreatedInviteModal.jsx";
 import MeetingRbacPanel from "../components/MeetingRbacPanel.jsx";
+import { useTheme } from "../lib/theme.js";
 
 const inputCls =
   "w-full rounded-2xl border border-navy-800/10 bg-white px-4 py-3.5 text-sm text-navy-800 placeholder-navy-300 shadow-[0_1px_2px_rgba(15,27,45,0.04)] focus:border-mint-400 focus:shadow-glow transition-all";
@@ -284,7 +285,7 @@ function GateTaskCard({ task, friends, onChange, onComplete, onRemove, disabled 
             />
             {deleteHidden ? (
               <span className="shrink-0 inline-flex items-center gap-1 text-[10px] font-bold text-amber-600 bg-amber-50 border border-amber-100 px-1.5 py-0.5 rounded-md" title="上級指示・唯讀">
-                👑 上級指示
+                上級指示
               </span>
             ) : (
               <button
@@ -385,6 +386,8 @@ function GateTaskCard({ task, friends, onChange, onComplete, onRemove, disabled 
    ═══════════════════════════════════════════════════════════════════════ */
 export default function CreateMeeting({ store, go, modeId = "enterprise", friends = [] }) {
   const mode = getMode(modeId);
+  const { resolved: themeResolved } = useTheme();
+  const isDark = themeResolved === "dark";
   const [step, setStep] = useState(1);
   const [scenarioId, setScenarioId] = useState(mode.scenarios[0].id);
   const [values, setValues] = useState(() => initValues(mode.scenarios[0]));
@@ -573,7 +576,7 @@ export default function CreateMeeting({ store, go, modeId = "enterprise", friend
       {/* Header + 進度條 */}
       <div className="text-center">
         <h1 className="text-2xl font-black text-navy-800">發起會議</h1>
-        <p className="text-navy-400 mt-1 text-sm">{mode.emoji} {mode.label} · 三步驟檢核，開一場有準備的會</p>
+        <p className="text-navy-400 mt-1 text-sm">{mode.label} · 三步驟檢核，開一場有準備的會</p>
       </div>
       <div className="mt-5">
         <Stepper step={step} goStep={setStep} />
@@ -615,19 +618,53 @@ export default function CreateMeeting({ store, go, modeId = "enterprise", friend
                     key={s.id}
                     type="button"
                     onClick={() => selectScenario(s.id)}
-                    className={`text-left rounded-3xl border p-4 transition-all duration-200 active:scale-[0.98]
-                      ${active ? "border-mint-400 bg-mint-50/60 ring-2 ring-mint-200 shadow-glow" : "border-navy-800/8 bg-white hover:border-mint-200 hover:shadow-card"}`}
+                    className={`relative flex flex-col justify-center text-left rounded-3xl border px-6 py-5 min-h-[96px] transition-all duration-200 active:scale-[0.98] ${
+                      isDark
+                        ? active
+                          ? "bg-[#111c35] border-2 border-cyan-400 shadow-none ring-0"
+                          : "bg-[#111c35] border border-slate-700/70 hover:border-slate-500 shadow-none"
+                        : active
+                        ? "border-mint-400 bg-mint-50/60 ring-2 ring-mint-200 shadow-glow"
+                        : "border-navy-800/8 bg-white hover:border-mint-200 hover:shadow-card"
+                    }`}
                   >
-                    <div className="flex items-center justify-between">
-                      <span className="text-2xl">{s.emoji}</span>
-                      {active && (
-                        <span className="h-5 w-5 rounded-full bg-mint-500 text-white flex items-center justify-center">
-                          <Check className="h-3.5 w-3.5" strokeWidth={3} />
-                        </span>
-                      )}
-                    </div>
-                    <p className={`mt-2 font-black ${active ? "text-mint-700" : "text-navy-800"}`}>{s.label}</p>
-                    <p className="text-[11px] text-navy-400 mt-0.5 leading-snug">{s.tagline}</p>
+                    {active && (
+                      <span
+                        className={`absolute top-4 right-4 h-5 w-5 rounded-full flex items-center justify-center ${
+                          isDark
+                            ? "bg-cyan-400 text-slate-950"
+                            : "bg-mint-500 text-white"
+                        }`}
+                      >
+                        <Check className="h-3.5 w-3.5" strokeWidth={3} />
+                      </span>
+                    )}
+                    <p
+                      className={`leading-tight font-semibold ${
+                        isDark
+                          ? active
+                            ? "text-white"
+                            : "text-slate-300"
+                          : active
+                          ? "text-mint-700 font-black"
+                          : "text-navy-800 font-black"
+                      }`}
+                    >
+                      {s.label}
+                    </p>
+                    <p
+                      className={`mt-1 text-[11px] leading-snug ${
+                        isDark
+                          ? active
+                            ? "text-slate-200"
+                            : "text-slate-400"
+                          : active
+                          ? "text-navy-500"
+                          : "text-navy-400"
+                      }`}
+                    >
+                      {s.tagline}
+                    </p>
                   </button>
                 );
               })}
@@ -647,7 +684,7 @@ export default function CreateMeeting({ store, go, modeId = "enterprise", friend
         {step === 2 && (
           <div className="fade-in space-y-5 bg-white/70 backdrop-blur-sm border border-navy-800/8 rounded-3xl p-5 md:p-6 shadow-[0_1px_2px_rgba(15,27,45,0.04)]">
             <div className="flex items-center gap-2 text-xs font-semibold text-mint-700 bg-mint-50 rounded-full px-3 py-1.5 w-fit">
-              {scenario.emoji} {scenario.label}
+              {scenario.label}
             </div>
 
             <Field label="會議主題" required>
@@ -672,7 +709,7 @@ export default function CreateMeeting({ store, go, modeId = "enterprise", friend
                   friends={friends}
                 />
                 <p className="mt-2 text-[11px] leading-relaxed text-navy-400">
-                  💡 若對方尚未加入好友，此欄可先留空，開會時讓與會者輸入會議代碼即可直接加入。
+                  若對方尚未加入好友，此欄可先留空，開會時讓與會者輸入會議代碼即可直接加入。
                 </p>
               </Field>
             )}

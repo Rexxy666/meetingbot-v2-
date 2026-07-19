@@ -45,8 +45,7 @@ export default function InviteModal({ meeting, friends = [], socket, onClose }) 
 
         {friends.length === 0 ? (
           <div className="text-center py-10">
-            <div className="text-3xl">👥</div>
-            <p className="mt-2 text-sm text-navy-400">還沒有好友，先到「好友」頁加好友吧。</p>
+            <p className="text-sm text-navy-400">還沒有好友，先到「好友」頁加好友吧。</p>
           </div>
         ) : (
           <div className="mt-4 space-y-2 max-h-80 overflow-y-auto">
