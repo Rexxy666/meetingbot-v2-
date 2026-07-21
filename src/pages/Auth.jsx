@@ -70,13 +70,6 @@ export default function Auth({ auth }) {
     }
   };
 
-  const clearCache = () => {
-    auth.resetLocalCache?.();
-    setError(null);
-    setHint("已清除本機登入快取。請重新註冊或登入。");
-    setPassword("");
-  };
-
   const googleLogin = async () => {
     setBusy(true);
     setError(null);
@@ -99,7 +92,6 @@ export default function Auth({ auth }) {
         <div className="text-center mb-8">
           <h1 className="text-3xl font-black text-mint-600 tracking-tight">MeetFlow</h1>
           <p className="mt-2 text-sm text-navy-400">登入後只會看到屬於你的會議與待辦</p>
-          <p className="mt-1 text-[11px] text-navy-300">後端：{auth.apiBase || "—"}</p>
         </div>
 
         <div className="bg-white border border-navy-800/8 rounded-3xl shadow-card p-6">
@@ -210,14 +202,6 @@ export default function Auth({ auth }) {
               </button>
             </>
           )}
-
-          <button
-            type="button"
-            onClick={clearCache}
-            className="mt-4 w-full text-xs font-semibold text-navy-400 hover:text-coral-500 transition-colors"
-          >
-            登入異常？清除本機登入快取
-          </button>
         </div>
       </div>
     </div>
