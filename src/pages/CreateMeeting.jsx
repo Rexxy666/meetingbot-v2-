@@ -568,7 +568,7 @@ export default function CreateMeeting({ store, go, modeId = "enterprise", friend
           meetingCode={created.code}
           title={created.title}
           attendeeCount={created.attendeeCount || 0}
-          onEnterLive={() => go("live", created.id)}
+          onEnterLive={() => go("prejoin", created.id)}
           onDone={() => go("dashboard", created.id)}
         />
       )}

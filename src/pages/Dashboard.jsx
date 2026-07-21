@@ -12,6 +12,7 @@ import {
 import { API_BASE, joinMeetingByLink } from "../lib/api.js";
 import { getMode } from "../config/meetingConfig.js";
 import { useTheme } from "../lib/theme.js";
+import PreJoinConfirmModal from "../components/PreJoinConfirmModal.jsx";
 
 const CARD = "bg-white border border-gray-100 shadow-sm rounded-2xl";
 
@@ -138,7 +139,7 @@ function DeleteConfirmModal({ busy, onCancel, onConfirm }) {
   );
 }
 
-function MeetingCard({ m, go, onDelete, me, isDark }) {
+function MeetingCard({ m, go, onDelete, me, isDark, onRequestJoin }) {
   const isOwner = !me || m.ownerId === me.id;
   const isLive = m.status === "live";
   const canShowMore = isOwner && !isLive;
@@ -313,7 +314,10 @@ function MeetingCard({ m, go, onDelete, me, isDark }) {
 
         <button
           type="button"
-          onClick={() => go(primary.to, m.id)}
+          onClick={() => {
+            if (primary.to === "live") onRequestJoin?.(m);
+            else go(primary.to, m.id);
+          }}
           className={`shrink-0 inline-flex items-center gap-1.5 text-xs md:text-sm font-semibold px-3.5 py-2 rounded-xl transition-all active:scale-95 ${btnCls}`}
         >
           {primary.label}
@@ -657,6 +661,7 @@ export default function Dashboard({ store, go, me, mode = "enterprise" }) {
       return "";
     }
   });
+  const [preJoinTarget, setPreJoinTarget] = useState(null);
 
   useEffect(() => {
     if (!kickToast) return undefined;
@@ -668,6 +673,23 @@ export default function Dashboard({ store, go, me, mode = "enterprise" }) {
     const t = window.setTimeout(() => setKickToast(""), 4500);
     return () => window.clearTimeout(t);
   }, [kickToast]);
+
+  const requestJoinMeeting = (meetingOrId, meetingObj) => {
+    const id = typeof meetingOrId === "object" ? meetingOrId?.id : meetingOrId;
+    const meeting =
+      typeof meetingOrId === "object"
+        ? meetingOrId
+        : meetingObj || meetings.find((row) => row.id === id) || { id, title: "會議" };
+    if (!id) return;
+    setPreJoinTarget(meeting);
+  };
+
+  const confirmGoPrepare = () => {
+    if (!preJoinTarget?.id) return;
+    const id = preJoinTarget.id;
+    setPreJoinTarget(null);
+    go("prejoin", id);
+  };
 
   const upcoming = useMemo(
     () => meetings.filter((m) => m.status !== "done"),
@@ -748,7 +770,7 @@ export default function Dashboard({ store, go, me, mode = "enterprise" }) {
     } catch {
       /* 本地已有 meeting，仍可進房 */
     }
-    go("live", meetingId);
+    requestJoinMeeting(meeting || { id: meetingId, title: meeting?.title || "會議" });
   };
 
   return (
@@ -829,6 +851,7 @@ export default function Dashboard({ store, go, me, mode = "enterprise" }) {
                           onDelete={deleteMeeting}
                           me={me}
                           isDark={isDark}
+                          onRequestJoin={requestJoinMeeting}
                         />
                       </div>
                     ))}
@@ -844,6 +867,7 @@ export default function Dashboard({ store, go, me, mode = "enterprise" }) {
                         onDelete={deleteMeeting}
                         me={me}
                         isDark={isDark}
+                        onRequestJoin={requestJoinMeeting}
                       />
                     ))}
                   </div>
@@ -881,6 +905,13 @@ export default function Dashboard({ store, go, me, mode = "enterprise" }) {
           </aside>
         </div>
       )}
+
+      <PreJoinConfirmModal
+        open={Boolean(preJoinTarget)}
+        meetingTitle={preJoinTarget?.title || "會議"}
+        onCancel={() => setPreJoinTarget(null)}
+        onConfirm={confirmGoPrepare}
+      />
     </div>
   );
 }

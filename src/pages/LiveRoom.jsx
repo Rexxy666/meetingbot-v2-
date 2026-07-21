@@ -1,14 +1,12 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
-  Check,
   ChevronDown,
-  Copy,
-  KeyRound,
+  ChevronLeft,
+  ChevronRight,
   Lock,
   Mic,
   MicOff,
   MonitorUp,
-  MoreVertical,
   ShieldCheck,
   Users,
   Video,
@@ -16,13 +14,29 @@ import {
 } from "lucide-react";
 import Avatar from "../components/Avatar.jsx";
 import PainPointsList from "../components/PainPointsList.jsx";
+import MeetingHeader from "../components/MeetingHeader.jsx";
 import InviteModal from "../components/InviteModal.jsx";
-import { formatMeetingCode } from "../components/CreatedInviteModal.jsx";
+import AgendaTimerCard from "../components/AgendaTimerCard.jsx";
+import LeftVideoSidebar from "../components/LeftVideoSidebar.jsx";
+import ParticipantItemMenu from "../components/ParticipantItemMenu.jsx";
+import MeetingNotesContainer, {
+  loadCornell,
+  saveCornell,
+} from "../components/MeetingNotesContainer.jsx";
+import {
+  appendAiBlockToNotes,
+  patchAiBlockInNotes,
+} from "../components/MeetingNotesEditor.jsx";
+import FloatingAIAssistantButton from "../components/FloatingAIAssistantButton.jsx";
+import MeetingNotesWithBottomAIPanel from "../components/MeetingNotesWithBottomAIPanel.jsx";
+import { useMode } from "../lib/settings.js";
 import { extractReview } from "../lib/extract.js";
 import { formatTranscriptForAi } from "../lib/meetingsCache.js";
+import { flattenNotesDoc } from "../lib/notesDocument.js";
 import { connectSocket } from "../lib/socket.js";
 import { inviteToMeeting } from "../lib/api.js";
 import { useLocalMediaAndStt } from "../hooks/useLocalMediaAndStt.js";
+import VideoPanel from "../components/VideoPanel.jsx";
 
 const TYPING_PALETTE = [
   { text: "text-mint-700", bg: "bg-mint-50", dot: "bg-mint-500" },
@@ -192,75 +206,183 @@ const reporterKey = (me) => {
   return `name:${normName(me.name)}`;
 };
 
-function MemberActionMenu({
-  member,
+/** 單一與會列：Badge + 固定寬操作槽，確保垂直對齊 */
+function ParticipantItem({
+  member: p,
+  hostName = "",
+  meName = "",
+  meId = null,
   canKick = false,
-  isSelf = false,
+  onKick,
   onProfile,
   onReport,
-  onKick,
+  showEditAuth = false,
+  allowedEditors = [],
+  onToggleEditor,
+  canConfigureAuth = false,
+  onDark = false,
+  preferDropup = true,
 }) {
-  const [open, setOpen] = useState(false);
-  if (isSelf) return null;
+  const joinedNow = p.status === "joined";
+  const isHostRow = hostName && normName(p.name) === normName(hostName);
+  const isSelf =
+    (meId && p.id && p.id === meId) ||
+    (meName && normName(p.name) === normName(meName));
+  const showKick = canKick && !isHostRow && !isSelf && typeof onKick === "function";
+  const editOn = allowedEditors.includes(p.name) || isHostRow;
 
   return (
-    <div className="relative shrink-0">
-      <button
-        type="button"
-        aria-label="更多操作"
-        aria-expanded={open}
-        onClick={(e) => {
-          e.stopPropagation();
-          setOpen((v) => !v);
-        }}
-        className="h-7 w-7 inline-flex items-center justify-center rounded-lg text-navy-400 hover:text-navy-700 hover:bg-navy-800/5 transition-colors"
-      >
-        <MoreVertical className="h-4 w-4" strokeWidth={2.2} />
-      </button>
-      {open && (
-        <>
-          <button
-            type="button"
-            aria-label="關閉選單"
-            className="fixed inset-0 z-40 cursor-default"
-            onClick={() => setOpen(false)}
-          />
-          <div className="absolute right-0 top-full mt-1 z-50 w-40 rounded-xl border border-navy-800/10 bg-white/95 backdrop-blur-md shadow-card-hover py-1 ring-1 ring-navy-800/5 fade-in">
-            <button
-              type="button"
-              className="w-full text-left px-3 py-2 text-xs font-semibold text-navy-700 hover:bg-navy-800/[0.04] transition-colors"
-              onClick={() => {
-                setOpen(false);
-                onProfile?.(member);
-              }}
+    <li
+      className={`flex items-center gap-2 rounded-xl px-2 py-1.5 transition-all duration-500 ease-out ${
+        joinedNow
+          ? onDark
+            ? "bg-white/[0.07] border border-white/10 opacity-100 translate-y-0"
+            : "bg-white border border-mint-100 shadow-sm opacity-100 translate-y-0"
+          : "bg-transparent border border-transparent opacity-70"
+      }`}
+    >
+      <div className={`relative ${joinedNow ? "scale-100" : "scale-95"} transition-transform duration-500`}>
+        <Avatar name={p.name} color={avatarColor(p.name)} size="h-7 w-7" ring={false} />
+        {!joinedNow && (
+          <span className="absolute -right-0.5 -bottom-0.5 h-2.5 w-2.5 rounded-full bg-amber-400 border-2 border-white animate-pulse" />
+        )}
+        {joinedNow && (
+          <span className="absolute -right-0.5 -bottom-0.5 h-2.5 w-2.5 rounded-full bg-mint-500 border-2 border-white" />
+        )}
+      </div>
+      <div className="min-w-0 flex-1">
+        <p
+          className={`text-xs font-semibold truncate ${
+            onDark ? "text-white/90" : "text-navy-700"
+          }`}
+        >
+          {p.name}
+          {isHostRow ? (
+            <span
+              className={`ml-1 text-[9px] font-bold ${
+                onDark ? "text-mint-300" : "text-mint-600"
+              }`}
             >
-              個人資訊
-            </button>
-            <button
-              type="button"
-              className="w-full text-left px-3 py-2 text-xs font-semibold text-navy-700 hover:bg-navy-800/[0.04] transition-colors"
-              onClick={() => {
-                setOpen(false);
-                onReport?.(member);
-              }}
+              Host
+            </span>
+          ) : null}
+          {isSelf ? (
+            <span
+              className={`ml-1 text-[9px] font-bold ${
+                onDark ? "text-white/45" : "text-navy-300"
+              }`}
             >
-              舉報成員
-            </button>
-            {canKick && (
-              <button
-                type="button"
-                className="w-full text-left px-3 py-2 text-xs font-semibold text-coral-500 hover:bg-coral-50 transition-colors"
-                onClick={() => {
-                  setOpen(false);
-                  onKick?.(member);
-                }}
-              >
-                踢除成員
-              </button>
-            )}
-          </div>
-        </>
+              我
+            </span>
+          ) : null}
+        </p>
+        {p.email ? (
+          <p
+            className={`text-[10px] truncate ${
+              onDark ? "text-white/40" : "text-navy-300"
+            }`}
+          >
+            {p.email}
+          </p>
+        ) : null}
+      </div>
+      <div className="shrink-0 flex items-center gap-1">
+        <span
+          className={`text-[10px] font-bold px-1.5 py-0.5 rounded-md ${
+            joinedNow
+              ? onDark
+                ? "bg-mint-400/15 text-mint-300 border border-mint-400/25"
+                : "bg-mint-50 text-mint-700 border border-mint-100"
+              : onDark
+                ? "bg-amber-400/15 text-amber-300 border border-amber-400/25"
+                : "bg-amber-50 text-amber-600 border border-amber-100"
+          }`}
+        >
+          {joinedNow ? "已加入" : "邀請中"}
+        </span>
+        {showEditAuth && !isHostRow && typeof onToggleEditor === "function" && (
+          <label className="flex items-center gap-1" title="筆記編輯授權">
+            <Toggle
+              checked={editOn}
+              disabled={!canConfigureAuth}
+              onChange={(v) => onToggleEditor(p.name, v)}
+            />
+          </label>
+        )}
+        <ParticipantItemMenu
+          member={p}
+          canKick={showKick}
+          isSelf={isSelf}
+          onDark={onDark}
+          preferDropup={preferDropup}
+          onProfile={onProfile}
+          onReport={onReport}
+          onKick={onKick}
+        />
+      </div>
+    </li>
+  );
+}
+
+function ParticipantRoster({
+  roster,
+  canKick = false,
+  hostName = "",
+  meName = "",
+  meId = null,
+  onKick,
+  onProfile,
+  onReport,
+  showEditAuth = false,
+  allowedEditors = [],
+  onToggleEditor,
+  canConfigureAuth = false,
+  bare = false,
+  hideHeader = false,
+  onDark = false,
+}) {
+  const clean = dedupeRoster(roster);
+  if (!clean.length) return null;
+  const joined = clean.filter((p) => p.status === "joined").length;
+  return (
+    <div
+      className={
+        bare
+          ? ""
+          : "mt-3 rounded-2xl border border-navy-800/8 bg-navy-800/[0.02] px-3 py-2.5"
+      }
+    >
+      {!hideHeader && (
+        <div className="flex items-center justify-between gap-2 mb-2">
+          <p className={`text-[11px] font-bold ${onDark ? "text-white/60" : "text-navy-500"}`}>
+            與會者動態
+          </p>
+          <p className={`text-[10px] font-semibold ${onDark ? "text-mint-300" : "text-mint-600"}`}>
+            {joined}/{clean.length} 已加入
+          </p>
+        </div>
       )}
+      <ul className="space-y-1.5">
+        {clean.map((p) => (
+          <ParticipantItem
+            key={`roster-${normName(p.name)}-${p.id || "x"}`}
+            member={p}
+            hostName={hostName}
+            meName={meName}
+            meId={meId}
+            canKick={canKick}
+            onKick={onKick}
+            onProfile={onProfile}
+            onReport={onReport}
+            showEditAuth={showEditAuth}
+            allowedEditors={allowedEditors}
+            onToggleEditor={onToggleEditor}
+            canConfigureAuth={canConfigureAuth}
+            onDark={onDark}
+            preferDropup
+          />
+        ))}
+      </ul>
     </div>
   );
 }
@@ -429,112 +551,6 @@ function ReportMemberModal({ member, submitting = false, onClose, onSubmit }) {
   );
 }
 
-function ParticipantRoster({
-  roster,
-  canKick = false,
-  hostName = "",
-  meName = "",
-  meId = null,
-  onKick,
-  onProfile,
-  onReport,
-  showEditAuth = false,
-  allowedEditors = [],
-  onToggleEditor,
-  canConfigureAuth = false,
-  bare = false,
-}) {
-  const clean = dedupeRoster(roster);
-  if (!clean.length) return null;
-  const joined = clean.filter((p) => p.status === "joined").length;
-  return (
-    <div
-      className={
-        bare
-          ? ""
-          : "mt-3 rounded-2xl border border-navy-800/8 bg-navy-800/[0.02] px-3 py-2.5"
-      }
-    >
-      <div className="flex items-center justify-between gap-2 mb-2">
-        <p className="text-[11px] font-bold text-navy-500">與會者動態</p>
-        <p className="text-[10px] font-semibold text-mint-600">
-          {joined}/{clean.length} 已加入
-        </p>
-      </div>
-      <ul className="space-y-1.5">
-        {clean.map((p) => {
-          const joinedNow = p.status === "joined";
-          const isHostRow = hostName && normName(p.name) === normName(hostName);
-          const isSelf =
-            (meId && p.id && p.id === meId) ||
-            (meName && normName(p.name) === normName(meName));
-          const showKick = canKick && !isHostRow && !isSelf && typeof onKick === "function";
-          const editOn = allowedEditors.includes(p.name) || isHostRow;
-          return (
-            <li
-              key={`roster-${normName(p.name)}-${p.id || "x"}`}
-              className={`flex items-center gap-2 rounded-xl px-2 py-1.5 transition-all duration-500 ease-out ${
-                joinedNow
-                  ? "bg-white border border-mint-100 shadow-sm opacity-100 translate-y-0"
-                  : "bg-transparent border border-transparent opacity-70"
-              }`}
-            >
-              <div className={`relative ${joinedNow ? "scale-100" : "scale-95"} transition-transform duration-500`}>
-                <Avatar name={p.name} color={avatarColor(p.name)} size="h-7 w-7" ring={false} />
-                {!joinedNow && (
-                  <span className="absolute -right-0.5 -bottom-0.5 h-2.5 w-2.5 rounded-full bg-amber-400 border-2 border-white animate-pulse" />
-                )}
-                {joinedNow && (
-                  <span className="absolute -right-0.5 -bottom-0.5 h-2.5 w-2.5 rounded-full bg-mint-500 border-2 border-white" />
-                )}
-              </div>
-              <div className="min-w-0 flex-1">
-                <p className="text-xs font-semibold text-navy-700 truncate">
-                  {p.name}
-                  {isHostRow ? (
-                    <span className="ml-1 text-[9px] font-bold text-mint-600">Host</span>
-                  ) : null}
-                  {isSelf ? (
-                    <span className="ml-1 text-[9px] font-bold text-navy-300">我</span>
-                  ) : null}
-                </p>
-                {p.email ? <p className="text-[10px] text-navy-300 truncate">{p.email}</p> : null}
-              </div>
-              <div className="shrink-0 flex items-center gap-1">
-                <span
-                  className={`text-[10px] font-bold px-1.5 py-0.5 rounded-md ${
-                    joinedNow
-                      ? "bg-mint-50 text-mint-700 border border-mint-100"
-                      : "bg-amber-50 text-amber-600 border border-amber-100"
-                  }`}
-                >
-                  {joinedNow ? "已加入" : "邀請中"}
-                </span>
-                {showEditAuth && !isHostRow && typeof onToggleEditor === "function" && (
-                  <label className="flex items-center gap-1" title="筆記編輯授權">
-                    <Toggle
-                      checked={editOn}
-                      disabled={!canConfigureAuth}
-                      onChange={(v) => onToggleEditor(p.name, v)}
-                    />
-                  </label>
-                )}
-                <MemberActionMenu
-                  member={p}
-                  canKick={showKick}
-                  isSelf={isSelf}
-                  onProfile={onProfile}
-                  onReport={onReport}
-                  onKick={onKick}
-                />
-              </div>
-            </li>
-          );
-        })}
-      </ul>
-    </div>
-  );
-}
 
 /** 最多顯示 3 個頭像；超過則以 +N 收攏，點擊開啟完整名單 */
 function CompactAvatarStack({ people = [], onOpen, maxVisible = 3 }) {
@@ -574,74 +590,9 @@ function CompactAvatarStack({ people = [], onOpen, maxVisible = 3 }) {
   );
 }
 
-function MeetingCodeChip({ code }) {
-  const digits = String(code || "").replace(/\D/g, "");
-  const [copied, setCopied] = useState(false);
-  if (!digits) return null;
-  const copy = async () => {
-    try {
-      await navigator.clipboard.writeText(digits);
-      setCopied(true);
-      setTimeout(() => setCopied(false), 1600);
-    } catch {
-      /* ignore */
-    }
-  };
-  return (
-    <button
-      type="button"
-      onClick={copy}
-      title="點擊複製會議代碼"
-      className="flex items-center gap-1.5 text-xs font-semibold bg-white/10 hover:bg-white/20 text-white px-2.5 py-1.5 rounded-full transition-colors"
-    >
-      <KeyRound className="h-3.5 w-3.5 opacity-80" strokeWidth={2} />
-      <span className="tabular-nums tracking-wider">{formatMeetingCode(digits)}</span>
-      {copied ? (
-        <Check className="h-3.5 w-3.5 text-mint-300" strokeWidth={2.5} />
-      ) : (
-        <Copy className="h-3.5 w-3.5 opacity-70" strokeWidth={2} />
-      )}
-    </button>
-  );
-}
-
 function formatClock(seconds) {
   const s = Math.max(0, seconds | 0);
   return `${String(Math.floor(s / 60)).padStart(2, "0")}:${String(s % 60).padStart(2, "0")}`;
-}
-
-function CircleTimer({ seconds, total }) {
-  const r = 34;
-  const c = 2 * Math.PI * r;
-  const pct = total > 0 ? Math.max(0, seconds / total) : 0;
-  const mm = String(Math.floor(Math.max(0, seconds) / 60)).padStart(2, "0");
-  const ss = String(Math.max(0, seconds) % 60).padStart(2, "0");
-  const low = seconds <= 60;
-  return (
-    <div className="relative h-24 w-24 shrink-0">
-      <svg viewBox="0 0 80 80" className="h-24 w-24 -rotate-90">
-        <circle cx="40" cy="40" r={r} fill="none" stroke="#E7EDF1" strokeWidth="7" />
-        <circle
-          cx="40"
-          cy="40"
-          r={r}
-          fill="none"
-          strokeWidth="7"
-          strokeLinecap="round"
-          stroke={low ? "#FF8A5B" : "#14B8A6"}
-          strokeDasharray={c}
-          strokeDashoffset={c * (1 - pct)}
-          style={{ transition: "stroke-dashoffset 1s linear, stroke .3s" }}
-        />
-      </svg>
-      <div className="absolute inset-0 flex flex-col items-center justify-center">
-        <span className={`text-lg font-black tabular-nums ${low ? "text-coral-500" : "text-navy-800"}`}>
-          {mm}:{ss}
-        </span>
-        <span className="text-[9px] font-semibold text-navy-300">剩餘</span>
-      </div>
-    </div>
-  );
 }
 
 /**
@@ -876,7 +827,8 @@ function HostPermissionMatrix({
  * 精準授權矩陣 + 結束會議規則 + 跨端結束強同步
  * 會後 AI 以 transcript 為主資料源，經 meetingsCache 避免重複燒 Token
  */
-export default function LiveRoom({ meeting, store, go, social, me, onAgendaChange }) {
+export default function LiveRoom({ meeting, store, go, social, me, onAgendaChange, initialMediaSettings = null }) {
+  const [mode] = useMode();
   const total = meeting.durationMin * 60;
   const agenda = useMemo(
     () => (meeting.goals?.length ? meeting.goals : ["會議討論"]),
@@ -887,6 +839,7 @@ export default function LiveRoom({ meeting, store, go, social, me, onAgendaChang
     if (meeting.startedAt) return Math.max(0, total - Math.floor((Date.now() - meeting.startedAt) / 1000));
     return total;
   });
+  const [timerPaused, setTimerPaused] = useState(false);
   const [agendaIdx, setAgendaIdx] = useState(0);
   const [peerCount, setPeerCount] = useState(1);
   const [inviting, setInviting] = useState(false);
@@ -992,6 +945,12 @@ export default function LiveRoom({ meeting, store, go, social, me, onAgendaChang
   const [syncError, setSyncError] = useState(null);
   /** 手機分頁：av | stt | notes | roster | pains */
   const [mobileTab, setMobileTab] = useState("av");
+  /** 桌機：左側視訊側欄是否折疊，最大化議程筆記 */
+  const [videoCollapsed, setVideoCollapsed] = useState(false);
+  /** 避免手機／桌機同時掛兩份 VideoPanel 搶同一組 media ref */
+  const [isMdUp, setIsMdUp] = useState(() =>
+    typeof window !== "undefined" ? window.matchMedia("(min-width: 768px)").matches : true
+  );
   /** 手機：與會者頭像展開名單 Modal */
   const [rosterModalOpen, setRosterModalOpen] = useState(false);
   /** 手機：超長會議名稱點擊展開 */
@@ -1008,6 +967,9 @@ export default function LiveRoom({ meeting, store, go, social, me, onAgendaChang
     return {};
   });
   const [typingList, setTypingList] = useState([]);
+  const [notesTab, setNotesTab] = useState("group");
+  const cornellUserKey = me?.id || me?.name || "anon";
+  const [cornell, setCornell] = useState(() => loadCornell(cornellUserKey, meeting.id));
 
   const socketRef = useRef(null);
   const notesTimer = useRef(null);
@@ -1015,10 +977,20 @@ export default function LiveRoom({ meeting, store, go, social, me, onAgendaChang
   const typingPeers = useRef(new Map());
   const transcriptEndRef = useRef(null);
   const transcriptScrollRef = useRef(null);
+  /** 靜音 AI 串流寫入錨點（共用筆記） */
+  const aiSharedAnchorRef = useRef({ topic: "", aiId: "", question: "" });
   const topic = agenda[agendaIdx];
 
   const hostName = useMemo(() => resolveHostName(meeting, me), [meeting, me]);
   const currentUserName = String(me?.name || "").trim() || "與會者";
+
+  useEffect(() => {
+    const mq = window.matchMedia("(min-width: 768px)");
+    const apply = () => setIsMdUp(mq.matches);
+    apply();
+    mq.addEventListener("change", apply);
+    return () => mq.removeEventListener("change", apply);
+  }, []);
 
   const appendTranscript = useCallback((row) => {
     if (!row?.text) return;
@@ -1040,6 +1012,8 @@ export default function LiveRoom({ meeting, store, go, social, me, onAgendaChang
     interimText,
     localVideoRef,
     screenVideoRef,
+    getCameraStream,
+    getScreenStream,
     startMedia,
     toggleMic,
     toggleCam,
@@ -1049,6 +1023,7 @@ export default function LiveRoom({ meeting, store, go, social, me, onAgendaChang
     speakerName: currentUserName,
     lang: "zh-TW",
     onFinalUtterance: appendTranscript,
+    initialMediaSettings,
   });
 
   /** 將 roster 寫回會議，供會後 Who 認領名單使用（寫入前強制去重） */
@@ -1354,9 +1329,10 @@ export default function LiveRoom({ meeting, store, go, social, me, onAgendaChang
   }, [meeting.id, persistRoster]);
 
   useEffect(() => {
+    if (timerPaused || meetingStatus === "ended") return undefined;
     const id = setInterval(() => setSec((s) => (s > 0 ? s - 1 : 0)), 1000);
     return () => clearInterval(id);
-  }, []);
+  }, [timerPaused, meetingStatus]);
 
   useEffect(() => {
     onAgendaChange?.(agendaIdx);
@@ -1797,10 +1773,10 @@ export default function LiveRoom({ meeting, store, go, social, me, onAgendaChang
     }, 120);
   };
 
-  const totalLines = Object.values(topicNotes).reduce(
-    (n, t) => n + (t ? t.split(/\r?\n/).filter(Boolean).length : 0),
-    0
-  );
+  const totalLines = Object.values(topicNotes).reduce((n, t) => {
+    const flat = flattenNotesDoc(t || "");
+    return n + (flat ? flat.split(/\r?\n/).filter(Boolean).length : 0);
+  }, 0);
 
   const typingHere = typingList.filter((t) => t.topic === topic);
   const typingTopics = new Map();
@@ -1811,12 +1787,15 @@ export default function LiveRoom({ meeting, store, go, social, me, onAgendaChang
   const buildForReview = () => {
     const fromTranscript = formatTranscriptForAi(transcript);
     if (fromTranscript.trim()) return fromTranscript;
-    return agenda.map((t) => (topicNotes[t] || "").trim()).filter(Boolean).join("\n");
+    return agenda
+      .map((t) => flattenNotesDoc(topicNotes[t] || "").trim())
+      .filter(Boolean)
+      .join("\n");
   };
   const buildDisplay = () =>
     agenda
       .map((t) => {
-        const x = (topicNotes[t] || "").trim();
+        const x = flattenNotesDoc(topicNotes[t] || "").trim();
         return x ? `## ${t}\n${x}` : "";
       })
       .filter(Boolean)
@@ -1886,6 +1865,72 @@ export default function LiveRoom({ meeting, store, go, social, me, onAgendaChang
     go("dashboard");
   };
 
+  useEffect(() => {
+    setCornell(loadCornell(cornellUserKey, meeting.id));
+  }, [cornellUserKey, meeting.id]);
+
+  const handleCornellChange = useCallback(
+    (next) => {
+      setCornell(next);
+      saveCornell(cornellUserKey, meeting.id, next);
+    },
+    [cornellUserKey, meeting.id]
+  );
+
+  /** 語音 Ask AI → 寫入共用筆記的 Inline AI Block（全員同步） */
+  const handleAiInsertShared = useCallback(
+    (partial, meta = {}) => {
+      const t = topic;
+      const q = meta.question || "";
+      if (meta.phase === "start") {
+        setNotesTab("group");
+        setMobileTab("notes");
+        setTopicNotes((prev) => {
+          const { serialized, aiId } = appendAiBlockToNotes(prev[t] || "", {
+            question: q,
+            answer: "",
+            status: "thinking",
+          });
+          aiSharedAnchorRef.current = { topic: t, aiId, question: q };
+          return { ...prev, [t]: serialized };
+        });
+        clearTimeout(notesTimer.current);
+        notesTimer.current = setTimeout(() => {
+          setTopicNotes((latest) => {
+            socketRef.current?.emit("notes:update", {
+              meetingId: meeting.id,
+              topic: t,
+              content: latest[t] || "",
+            });
+            return latest;
+          });
+        }, 80);
+        return;
+      }
+      const anchor = aiSharedAnchorRef.current;
+      if (!anchor?.topic || !anchor?.aiId) return;
+      const status = meta.phase === "done" ? "done" : "streaming";
+      setTopicNotes((prev) => ({
+        ...prev,
+        [anchor.topic]: patchAiBlockInNotes(prev[anchor.topic] || "", anchor.aiId, {
+          status,
+          answer: String(partial || ""),
+        }),
+      }));
+      if (meta.phase === "done") {
+        clearTimeout(notesTimer.current);
+        notesTimer.current = setTimeout(() => {
+          setTopicNotes((latest) => {
+            socketRef.current?.emit("notes:update", { meetingId: meeting.id, topicNotes: latest });
+            store.updateMeeting(meeting.id, { topicNotes: latest });
+            return latest;
+          });
+        }, 400);
+      }
+    },
+    [topic, meeting.id, store]
+  );
+
   const mobileTabs = [
     { id: "av", label: "音視訊", icon: "" },
     { id: "stt", label: "逐字稿", icon: "" },
@@ -1942,131 +1987,24 @@ export default function LiveRoom({ meeting, store, go, social, me, onAgendaChang
   );
 
   const videoGridPanel = (
-    <div className="flex flex-col min-h-0 h-full bg-gradient-to-b from-navy-900 via-navy-800 to-[#0f1b2d] rounded-3xl border border-white/10 shadow-card overflow-hidden">
-      <div className="flex items-center justify-between gap-2 px-4 py-3 border-b border-white/10 shrink-0">
-        <div className="min-w-0">
-          <p className="text-[11px] font-bold tracking-wide text-mint-300">本機真實媒體</p>
-          <p className="text-xs text-white/55 truncate">
-            {mediaReady ? "鏡頭／麥克風已連線" : "等待權限…"} · {micOn ? "收音中" : "靜音"} ·{" "}
-            {camOn ? "鏡頭開" : "鏡頭關"}
-            {screenSharing ? " · 螢幕分享中" : ""}
-            {sttListening ? " · STT 聆聽中" : ""}
-          </p>
-        </div>
-        <span className="shrink-0 inline-flex items-center gap-1.5 text-[10px] font-bold text-mint-200 bg-mint-500/15 border border-mint-400/20 px-2 py-1 rounded-full">
-          <span className="h-1.5 w-1.5 rounded-full bg-mint-300 animate-pulse" />
-          {camOn || micOn ? "LIVE" : "IDLE"}
-        </span>
-      </div>
-
-      {(mediaError || sttError) && (
-        <div className="px-3 pt-2 shrink-0">
-          <p className="text-[11px] text-coral-200 bg-coral-500/15 border border-coral-400/20 rounded-xl px-3 py-2">
-            {mediaError || sttError}
-            {!mediaReady && (
-              <button
-                type="button"
-                onClick={() => startMedia({ mic: true, cam: true })}
-                className="ml-2 underline font-bold text-white"
-              >
-                重新授權
-              </button>
-            )}
-          </p>
-        </div>
-      )}
-
-      <div className="flex-1 min-h-0 overflow-y-auto p-3 sm:p-4 space-y-2.5">
-        {/* 本機鏡頭：真實 <video> */}
-        <div
-          className={`relative aspect-video rounded-2xl overflow-hidden border bg-navy-950 ${
-            camOn ? "border-mint-400/40 ring-1 ring-mint-400/20" : "border-white/10"
-          }`}
-        >
-          <video
-            ref={localVideoRef}
-            autoPlay
-            playsInline
-            muted
-            className={`absolute inset-0 h-full w-full object-cover scale-x-[-1] ${
-              camOn ? "opacity-100" : "opacity-0"
-            }`}
-          />
-          {!camOn && (
-            <div className="absolute inset-0 flex flex-col items-center justify-center bg-navy-950">
-              <div
-                className={`h-16 w-16 rounded-full ${avatarColor(currentUserName)} flex items-center justify-center text-white text-xl font-black`}
-              >
-                {currentUserName.slice(0, 1)}
-              </div>
-              <p className="mt-2 text-[11px] font-semibold text-white/45">鏡頭已關閉</p>
-            </div>
-          )}
-          <div className="absolute inset-x-0 bottom-0 flex items-center justify-between gap-1 px-2.5 py-1.5 bg-gradient-to-t from-black/70 to-transparent">
-            <span className="text-[11px] font-bold text-white truncate">
-              {currentUserName}（你）
-            </span>
-            {!micOn && (
-              <span className="shrink-0 inline-flex h-5 w-5 items-center justify-center rounded-full bg-coral-500/90 text-white">
-                <MicOff className="h-3 w-3" strokeWidth={2.4} />
-              </span>
-            )}
-          </div>
-        </div>
-
-        {/* 螢幕分享：真實 getDisplayMedia */}
-        {screenSharing && (
-          <div className="relative aspect-video rounded-2xl overflow-hidden border border-sky-400/50 ring-2 ring-sky-400/30 bg-black">
-            <video
-              ref={screenVideoRef}
-              autoPlay
-              playsInline
-              muted
-              className="absolute inset-0 h-full w-full object-contain"
-            />
-            <div className="absolute left-2 top-2 text-[10px] font-bold text-sky-100 bg-sky-500/80 px-2 py-0.5 rounded-full">
-              螢幕分享
-            </div>
-          </div>
-        )}
-
-        {/* 其他與會者：尚無跨端 WebRTC，顯示佔位 */}
-        {videoParticipants.filter((p) => !p.isSelf).length > 0 && (
-          <div className="grid grid-cols-2 gap-2.5">
-            {videoParticipants
-              .filter((p) => !p.isSelf)
-              .map((p) => {
-                const color = avatarColor(p.name);
-                return (
-                  <div
-                    key={p.id || p.name}
-                    className="relative aspect-[4/3] rounded-2xl overflow-hidden border border-white/10 bg-navy-900/80"
-                  >
-                    <div className="absolute inset-0 flex flex-col items-center justify-center bg-gradient-to-br from-navy-700/40 via-navy-900 to-black">
-                      <div
-                        className={`h-12 w-12 rounded-full ${color} flex items-center justify-center text-white text-base font-black ring-1 ring-white/20`}
-                      >
-                        {(p.name || "?").slice(0, 1)}
-                      </div>
-                      <p className="mt-1.5 text-[10px] text-white/40">遠端視訊待接 WebRTC</p>
-                    </div>
-                    <div className="absolute inset-x-0 bottom-0 px-2.5 py-1.5 bg-gradient-to-t from-black/70 to-transparent">
-                      <span className="text-[11px] font-bold text-white truncate">{p.name}</span>
-                    </div>
-                  </div>
-                );
-              })}
-          </div>
-        )}
-      </div>
-
-      <div className="shrink-0 px-3 py-3 border-t border-white/10 bg-black/25 backdrop-blur-md">
-        {rtcControls}
-        <p className="mt-2 text-center text-[10px] text-white/40">
-          本機鏡頭／麥克風／螢幕為真實裝置串流；請允許瀏覽器權限
-        </p>
-      </div>
-    </div>
+    <VideoPanel
+      currentUserName={currentUserName}
+      micOn={micOn}
+      camOn={camOn}
+      screenSharing={screenSharing}
+      mediaReady={mediaReady}
+      mediaError={mediaError}
+      sttError={sttError}
+      sttListening={sttListening}
+      localVideoRef={localVideoRef}
+      screenVideoRef={screenVideoRef}
+      videoParticipants={videoParticipants}
+      rtcControls={rtcControls}
+      onRetryMedia={() => startMedia({ mic: true, cam: true })}
+      getCameraStream={getCameraStream}
+      getScreenStream={getScreenStream}
+      compact={isMdUp}
+    />
   );
 
   const transcriptWall = (
@@ -2188,7 +2126,7 @@ export default function LiveRoom({ meeting, store, go, social, me, onAgendaChang
                 className={`h-1.5 w-1.5 rounded-full ${typingTopics.get(a).dot} animate-pulse`}
                 title="有人正在此議程輸入"
               />
-            ) : (topicNotes[a] || "").trim() ? (
+            ) : flattenNotesDoc(topicNotes[a] || "").trim() ? (
               <span className="h-1.5 w-1.5 rounded-full bg-mint-400" />
             ) : null}
           </button>
@@ -2222,28 +2160,50 @@ export default function LiveRoom({ meeting, store, go, social, me, onAgendaChang
             </span>
           </div>
         )}
-        <textarea
+        {/* 方案 B：乾淨筆記正文 + 底部可收折 AI 對話面板（語音鈕收進面板 header） */}
+        <MeetingNotesWithBottomAIPanel
           key={agendaIdx}
+          className="flex-1 min-h-0"
+          editorClassName={`px-5 py-4 ${!canEdit ? "bg-navy-800/[0.02]" : ""}`}
           value={topicNotes[topic] || ""}
-          onChange={(e) => setCurrentNote(e.target.value)}
+          onChange={(next) => setCurrentNote(next)}
           disabled={!canEdit}
+          syncOnStream
           placeholder={
             canEdit
-              ? `「${topic}」的討論重點寫在這裡，一行一個。\n多人同時編輯會即時同步，切換議程不會混在一起。`
+              ? `「${topic}」的討論重點寫在這裡。\n輸入 @ai 或打 @ 叫出選單，問答會收進下方 AI 面板，不會插進正文。`
               : "唯讀狀態（尚未獲得發起人的編輯授權）"
           }
-          className={`w-full flex-1 min-h-[240px] md:min-h-[360px] md:h-[360px] resize-none px-5 md:px-5 py-4 md:py-4 text-sm leading-relaxed text-navy-800 font-mono placeholder-navy-300 transition-colors ${
-            !canEdit
-              ? "opacity-50 cursor-not-allowed bg-navy-800/[0.02]"
-              : "focus:bg-mint-50/20"
-          }`}
+          aiContext={
+            canEdit && meetingStatus !== "ended"
+              ? {
+                  transcriptRows: transcript,
+                  title: meeting.title || meetingDisplayTitle,
+                  topic,
+                  mode,
+                }
+              : null
+          }
+          voiceSlot={
+            meetingStatus !== "ended" ? (
+              <FloatingAIAssistantButton
+                transcriptRows={transcript}
+                title={meeting.title || meetingDisplayTitle}
+                topic={topic}
+                mode={mode}
+                onInsertShared={handleAiInsertShared}
+              />
+            ) : null
+          }
         />
       </div>
 
-      <div className="px-4 md:px-5 py-3.5 md:py-3 border-t border-navy-800/6 flex items-center justify-between bg-navy-800/[0.015] shrink-0">
-        <span className="text-xs text-navy-300 hidden sm:inline">即時同步 · 全部 {totalLines} 行</span>
+      <div className="px-4 md:px-5 py-2.5 border-t border-navy-800/6 bg-navy-800/[0.015] shrink-0 flex items-center justify-between gap-3">
+        <span className="text-xs text-navy-300 hidden sm:inline">
+          即時同步 · 全部 {totalLines} 行
+        </span>
         <span className="text-xs text-navy-300 sm:hidden">{totalLines} 行</span>
-        <div className="flex gap-2">
+        <div className="flex gap-2 shrink-0">
           <button
             type="button"
             onClick={saveLater}
@@ -2274,212 +2234,171 @@ export default function LiveRoom({ meeting, store, go, social, me, onAgendaChang
     </>
   );
 
-  const sidebarPanel = (
-    <div className="bg-white border border-navy-800/8 rounded-3xl p-5 shadow-card self-start">
-      <div className="flex items-center gap-3">
-        <CircleTimer seconds={sec} total={total} />
-        <div className="min-w-0">
-          <p className="text-xs font-semibold text-navy-400">當前議程</p>
-          <p className="font-black text-navy-800 leading-tight truncate">{topic}</p>
-          <p className="text-xs text-mint-600 font-semibold mt-1">
-            Time Boxing · 共 {agenda.length} 項
-          </p>
-        </div>
-      </div>
-      {meeting.pains?.length > 0 && (
-        <div className="mt-5 pt-5 border-t border-navy-800/8">
-          <PainPointsList pains={meeting.pains} compact />
-        </div>
-      )}
-      <div className="mt-5 space-y-2">
-        {agenda.map((a, i) => {
-          const hasNote = (topicNotes[a] || "").trim().length > 0;
-          return (
-            <button
-              key={i}
-              type="button"
-              onClick={() => selectAgenda(i)}
-              className={`w-full text-left flex items-center gap-3 p-3 rounded-2xl border transition-colors ${
-                i === agendaIdx
-                  ? "bg-mint-50 border-mint-200"
-                  : "bg-white border-navy-800/8 hover:border-mint-200"
-              }`}
-            >
-              <span
-                className={`h-6 w-6 shrink-0 rounded-full flex items-center justify-center text-xs font-bold ${
-                  i === agendaIdx ? "bg-mint-500 text-white" : "bg-navy-800/8 text-navy-400"
-                }`}
-              >
-                {i + 1}
-              </span>
-              <span
-                className={`text-sm font-semibold truncate flex-1 ${
-                  i === agendaIdx ? "text-navy-800" : "text-navy-400"
-                }`}
-              >
-                {a}
-              </span>
-              {hasNote && (
-                <span className="shrink-0 h-1.5 w-1.5 rounded-full bg-mint-400" title="已有筆記" />
-              )}
-              {i === agendaIdx && (
-                <span className="text-[10px] font-bold text-mint-600 bg-white px-2 py-0.5 rounded-full">
-                  現在
-                </span>
-              )}
-            </button>
-          );
-        })}
-      </div>
-      <button
-        type="button"
-        onClick={() => selectAgenda(Math.min(agendaIdx + 1, agenda.length - 1))}
-        className="mt-4 w-full text-sm font-semibold text-navy-600 border border-navy-800/10 rounded-xl py-2.5 hover:bg-navy-800/[0.03] transition-colors"
-      >
-        下一個議程 →
-      </button>
+  /** 團體共編 + 個人私密康乃爾筆記的雙分頁外殼 */
+  const notesPanel = (
+    <MeetingNotesContainer
+      className="flex-1 min-h-0"
+      meetingId={meeting.id}
+      userId={cornellUserKey}
+      tab={notesTab}
+      onTabChange={setNotesTab}
+      value={cornell}
+      onChange={handleCornellChange}
+      aiEnabled={meetingStatus !== "ended"}
+      transcriptRows={transcript}
+      meetingTitle={meeting.title || meetingDisplayTitle}
+      topic={topic}
+      mode={mode}
+    >
+      {notesEditor}
+    </MeetingNotesContainer>
+  );
 
-      <ParticipantRoster
-        roster={uniqueRoster}
-        canKick={canKick}
-        hostName={hostName}
-        meName={currentUserName}
-        meId={me?.id || null}
-        onKick={setKickTarget}
-        onProfile={setProfileTarget}
-        onReport={setReportTarget}
-      />
-    </div>
+  /* ══════════════════════════════════════════════════════════════════════
+     左欄：視訊（上 flex-1，控制列釘底）+ 與會人員（下 max-h 限高可滾）
+     ══════════════════════════════════════════════════════════════════════ */
+  const leftMediaAndParticipants = (
+    <LeftVideoSidebar
+      videoPanel={isMdUp ? videoGridPanel : null}
+      joinedCount={joinedCount}
+      rosterTotal={uniqueRoster.length || 0}
+      roster={
+        uniqueRoster.length ? (
+          <ParticipantRoster
+            bare
+            hideHeader
+            onDark
+            roster={uniqueRoster}
+            canKick={canKick}
+            hostName={hostName}
+            meName={currentUserName}
+            meId={me?.id || null}
+            onKick={setKickTarget}
+            onProfile={setProfileTarget}
+            onReport={setReportTarget}
+          />
+        ) : (
+          <p className="px-1 py-6 text-center text-[11px] text-white/40">尚無與會者</p>
+        )
+      }
+    />
+  );
+
+  /* ══════════════════════════════════════════════════════════════════════
+     右下：精簡 Time Boxing 卡（無痛點、無議程清單、無內部捲軸）
+     語音 AI 為全域 fixed FAB，不在此卡片內。
+     ══════════════════════════════════════════════════════════════════════ */
+  const sidebarPanel = (
+    <AgendaTimerCard
+      seconds={sec}
+      topic={topic}
+      agendaCount={agenda.length}
+      agendaIndex={agendaIdx}
+      paused={timerPaused}
+      onTogglePause={() => setTimerPaused((p) => !p)}
+      onNextAgenda={() => selectAgenda(Math.min(agendaIdx + 1, agenda.length - 1))}
+    />
   );
 
   return (
-    <div className="fade-in max-w-7xl mx-auto w-full px-3 pt-[max(0.75rem,env(safe-area-inset-top))] pb-[max(0.5rem,env(safe-area-inset-bottom))] md:px-6 md:py-6 md:overflow-visible overflow-hidden h-dvh md:h-auto flex flex-col">
-      <div className="sticky top-0 z-20 -mx-1 mb-2 md:mb-5 space-y-2 shrink-0 md:top-16">
+    <div className="fade-in max-w-7xl mx-auto w-full h-full min-h-0 flex flex-col overflow-hidden px-3 pt-[max(0.75rem,env(safe-area-inset-top))] pb-[max(0.5rem,env(safe-area-inset-bottom))] md:px-6 md:pt-4 md:pb-4">
+      {/* ── 頂部固定區：深色會議控制列 + 痛點（全站導覽改左側抽屜，不再覆蓋此列） ── */}
+      <header className="shrink-0 space-y-2 mb-2 md:mb-3 z-10 relative">
+        <MeetingHeader
+          title={meetingDisplayTitle}
+          meetingCode={meeting.code}
+          clockLabel={formatClock(sec)}
+          clockUrgent={sec <= 60}
+          onTitleClick={() => setTitleModalOpen(true)}
+        >
+          <div className="relative">
+            <button
+              type="button"
+              onClick={() => setRbacOpen((o) => !o)}
+              className={`flex items-center gap-1.5 text-xs font-semibold px-2.5 md:px-3 py-1.5 rounded-full transition-colors ${
+                rbacOpen ? "bg-white/25 text-white" : "bg-white/15 hover:bg-white/25 text-white"
+              }`}
+            >
+              <ShieldCheck className="h-3.5 w-3.5" strokeWidth={2} />
+              <span className="hidden sm:inline">權限</span>
+            </button>
+            {rbacOpen && (
+              <>
+                <div className="fixed inset-0 z-30" onClick={() => setRbacOpen(false)} />
+                <div className="absolute right-0 mt-2 w-[20.5rem] max-w-[90vw] z-40">
+                  <HostPermissionMatrix
+                    currentRole={currentRole}
+                    onTestRoleChange={handleTestRoleChange}
+                    showRoleSwitcher={isTrueHost && roleSwitcherAvailable}
+                    isHostAssignmentEnabled={isHostAssignmentEnabled}
+                    setIsHostAssignmentEnabled={updateHostAssign}
+                    isKickPermissionEnabled={isKickPermissionEnabled}
+                    setIsKickPermissionEnabled={updateKickPermission}
+                    memberNames={memberNames}
+                    allowedEditors={allowedEditors}
+                    setAllowedEditors={updateAllowedEditors}
+                    allowedKickers={allowedKickers}
+                    setAllowedKickers={updateAllowedKickers}
+                    endMeetingRule={endMeetingRule}
+                    setEndMeetingRule={updateEndRule}
+                    allowedEndMeetingUsers={allowedEndMeetingUsers}
+                    setAllowedEndMeetingUsers={updateAllowedEndUsers}
+                    readOnly={!isTrueHost || currentRole !== "host"}
+                    hostName={hostName}
+                  />
+                </div>
+              </>
+            )}
+          </div>
+
+          {social && (
+            <button
+              type="button"
+              onClick={() => setInviting(true)}
+              className="hidden sm:flex items-center gap-1.5 text-xs font-semibold bg-white/15 hover:bg-white/25 text-white px-3 py-1.5 rounded-full transition-colors"
+            >
+              <svg
+                viewBox="0 0 24 24"
+                className="h-3.5 w-3.5"
+                fill="none"
+                stroke="currentColor"
+                strokeWidth="2.2"
+                strokeLinecap="round"
+                strokeLinejoin="round"
+              >
+                <path d="M16 21v-2a4 4 0 00-4-4H6a4 4 0 00-4 4v2M9 11a4 4 0 100-8 4 4 0 000 8M19 8v6M22 11h-6" />
+              </svg>
+              邀請好友
+            </button>
+          )}
+          <span className="hidden sm:flex items-center gap-1.5 text-xs font-semibold bg-mint-500/20 text-mint-200 px-2.5 py-1 rounded-full">
+            <span
+              className={`h-1.5 w-1.5 rounded-full ${
+                syncState === "joined"
+                  ? "bg-mint-300 animate-pulse"
+                  : syncState === "error"
+                  ? "bg-coral-400"
+                  : "bg-navy-300"
+              }`}
+            />
+            {syncState === "joined"
+              ? `進行中 · ${peerCount} 人在線`
+              : syncState === "error"
+              ? "同步失敗"
+              : "連線中…"}
+          </span>
+        </MeetingHeader>
+
         <div className="hidden md:block">
           <PainPointsList pains={meeting.pains} />
         </div>
-        <div className="bg-navy-800 text-white rounded-2xl px-3 md:px-5 py-2.5 md:py-3.5 shadow-card-hover flex items-center gap-1.5 md:gap-3">
-          <span className="text-base md:text-lg shrink-0" aria-hidden>
-            
-          </span>
 
-          {/* 手機：會議名稱限寬截斷，點擊展開完整主題 */}
-          <button
-            type="button"
-            onClick={() => setTitleModalOpen(true)}
-            title={meetingDisplayTitle}
-            className="md:hidden font-bold text-[13px] leading-tight text-left max-w-[120px] truncate shrink min-w-0 active:opacity-80"
-          >
-            {meetingDisplayTitle}
-          </button>
-
-          {/* 桌機：完整標題可截斷但不需點擊 Modal */}
-          <p className="hidden md:block font-bold text-base truncate min-w-0 flex-1" title={meetingDisplayTitle}>
-            {meetingDisplayTitle}
-          </p>
-
-          <div className="ml-auto flex items-center gap-1.5 md:gap-2 shrink-0">
-            {/* 手機：倒計時整合進頂部目標列，離開右下角黃金操作區 */}
-            <span
-              className={`md:hidden inline-flex items-center gap-1.5 text-[11px] font-black tabular-nums px-2.5 py-1.5 rounded-full ${
-                sec <= 60 ? "bg-coral-400/25 text-coral-100" : "bg-white/15 text-white"
-              }`}
-              title="議程剩餘時間"
-            >
-              <span
-                className={`h-1.5 w-1.5 rounded-full ${
-                  sec <= 60 ? "bg-coral-300" : "bg-mint-300"
-                } animate-pulse`}
-              />
-              {formatClock(sec)}
-            </span>
-
-            <MeetingCodeChip code={meeting.code} />
-
-            <div className="relative">
-              <button
-                type="button"
-                onClick={() => setRbacOpen((o) => !o)}
-                className={`flex items-center gap-1.5 text-xs font-semibold px-2.5 md:px-3 py-1.5 rounded-full transition-colors ${
-                  rbacOpen ? "bg-white/25 text-white" : "bg-white/15 hover:bg-white/25 text-white"
-                }`}
-              >
-                <ShieldCheck className="h-3.5 w-3.5" strokeWidth={2} />
-                <span className="hidden sm:inline">權限</span>
-              </button>
-              {rbacOpen && (
-                <>
-                  <div className="fixed inset-0 z-30" onClick={() => setRbacOpen(false)} />
-                  <div className="absolute right-0 mt-2 w-[20.5rem] max-w-[90vw] z-40">
-                    <HostPermissionMatrix
-                      currentRole={currentRole}
-                      onTestRoleChange={handleTestRoleChange}
-                      showRoleSwitcher={isTrueHost && roleSwitcherAvailable}
-                      isHostAssignmentEnabled={isHostAssignmentEnabled}
-                      setIsHostAssignmentEnabled={updateHostAssign}
-                      isKickPermissionEnabled={isKickPermissionEnabled}
-                      setIsKickPermissionEnabled={updateKickPermission}
-                      memberNames={memberNames}
-                      allowedEditors={allowedEditors}
-                      setAllowedEditors={updateAllowedEditors}
-                      allowedKickers={allowedKickers}
-                      setAllowedKickers={updateAllowedKickers}
-                      endMeetingRule={endMeetingRule}
-                      setEndMeetingRule={updateEndRule}
-                      allowedEndMeetingUsers={allowedEndMeetingUsers}
-                      setAllowedEndMeetingUsers={updateAllowedEndUsers}
-                      readOnly={!isTrueHost || currentRole !== "host"}
-                      hostName={hostName}
-                    />
-                  </div>
-                </>
-              )}
-            </div>
-
-            {social && (
-              <button
-                type="button"
-                onClick={() => setInviting(true)}
-                className="hidden sm:flex items-center gap-1.5 text-xs font-semibold bg-white/15 hover:bg-white/25 text-white px-3 py-1.5 rounded-full transition-colors"
-              >
-                <svg
-                  viewBox="0 0 24 24"
-                  className="h-3.5 w-3.5"
-                  fill="none"
-                  stroke="currentColor"
-                  strokeWidth="2.2"
-                  strokeLinecap="round"
-                  strokeLinejoin="round"
-                >
-                  <path d="M16 21v-2a4 4 0 00-4-4H6a4 4 0 00-4 4v2M9 11a4 4 0 100-8 4 4 0 000 8M19 8v6M22 11h-6" />
-                </svg>
-                邀請好友
-              </button>
-            )}
-            <span className="hidden sm:flex items-center gap-1.5 text-xs font-semibold bg-mint-500/20 text-mint-200 px-2.5 py-1 rounded-full">
-              <span
-                className={`h-1.5 w-1.5 rounded-full ${
-                  syncState === "joined"
-                    ? "bg-mint-300 animate-pulse"
-                    : syncState === "error"
-                    ? "bg-coral-400"
-                    : "bg-navy-300"
-                }`}
-              />
-              {syncState === "joined"
-                ? `進行中 · ${peerCount} 人在線`
-                : syncState === "error"
-                ? "同步失敗"
-                : "連線中…"}
-            </span>
-          </div>
-        </div>
         {syncError && (
           <p className="text-xs text-coral-500 bg-coral-50 border border-coral-100 rounded-xl px-3 py-2">
             {syncError}
           </p>
         )}
-      </div>
+      </header>
 
       {inviting && social && (
         <InviteModal
@@ -2513,16 +2432,16 @@ export default function LiveRoom({ meeting, store, go, social, me, onAgendaChang
       </div>
 
       {/* ── 手機：單一分頁內容（鎖定一屏，不垂直堆疊） ── */}
-      <div className="md:hidden flex-1 min-h-0 flex flex-col">
-        {mobileTab === "av" && (
-          <div className="flex-1 min-h-0 flex flex-col">{videoGridPanel}</div>
+      <div className="md:hidden flex-1 min-h-0 flex flex-col overflow-hidden">
+        {mobileTab === "av" && !isMdUp && (
+          <div className="flex-1 min-h-0 flex flex-col overflow-hidden">{videoGridPanel}</div>
         )}
         {mobileTab === "stt" && (
-          <div className="flex-1 min-h-0 flex flex-col">{transcriptWall}</div>
+          <div className="flex-1 min-h-0 flex flex-col overflow-hidden">{transcriptWall}</div>
         )}
         {mobileTab === "notes" && (
           <div className="flex-1 min-h-0 bg-white border border-navy-800/8 rounded-3xl shadow-card overflow-hidden flex flex-col">
-            {notesEditor}
+            {notesPanel}
           </div>
         )}
         {mobileTab === "roster" && (
@@ -2565,23 +2484,62 @@ export default function LiveRoom({ meeting, store, go, social, me, onAgendaChang
         )}
       </div>
 
-      {/* ── 桌機：音視訊 + 筆記 + 逐字稿 ── */}
-      <div className="hidden md:grid grid-cols-1 xl:grid-cols-[340px_minmax(0,1fr)_320px] lg:grid-cols-[320px_minmax(0,1fr)] gap-5 items-stretch">
-        <div className="min-h-[520px] h-[min(72vh,720px)] flex flex-col gap-5">
-          <div className="flex-1 min-h-0">{videoGridPanel}</div>
-          <div className="hidden lg:block xl:hidden shrink-0 max-h-[280px] overflow-hidden">
-            {transcriptWall}
-          </div>
+      {/* ── 桌機：緊湊視訊側欄 + 主角議程筆記 + 逐字稿 ── */}
+      <div className="hidden md:flex flex-1 min-h-0 gap-3 xl:gap-4 items-stretch overflow-hidden">
+        {/* 左側：可折疊極簡視訊側欄 */}
+        <div
+          className={`relative shrink-0 min-h-0 h-full flex flex-col transition-[width] duration-200 ease-out ${
+            videoCollapsed ? "w-12" : "w-64 xl:w-72"
+          }`}
+        >
+          {videoCollapsed ? (
+            <button
+              type="button"
+              onClick={() => setVideoCollapsed(false)}
+              title="展開視訊側欄"
+              className="h-full w-full rounded-2xl border border-navy-800/10 bg-navy-900 text-white flex flex-col items-center justify-center gap-3 hover:bg-navy-800 transition-colors shadow-card"
+            >
+              <Video className="h-4 w-4 text-mint-300" strokeWidth={2.2} />
+              <ChevronRight className="h-4 w-4 text-white/70" strokeWidth={2.4} />
+              <span
+                className="text-[10px] font-bold text-white/50 tracking-wider"
+                style={{ writingMode: "vertical-rl" }}
+              >
+                視訊
+              </span>
+            </button>
+          ) : (
+            <div className="relative flex-1 min-h-0 flex flex-col">
+              {leftMediaAndParticipants}
+              <button
+                type="button"
+                onClick={() => setVideoCollapsed(true)}
+                title="收合視訊側欄，擴大筆記"
+                className="absolute -right-2.5 top-1/2 z-20 -translate-y-1/2 h-9 w-5 rounded-full border border-navy-800/15 bg-white text-navy-500 shadow-sm hover:bg-mint-50 hover:text-mint-700 flex items-center justify-center"
+              >
+                <ChevronLeft className="h-3.5 w-3.5" strokeWidth={2.6} />
+              </button>
+            </div>
+          )}
         </div>
-        <div className="bg-white border border-navy-800/8 rounded-3xl shadow-card overflow-hidden flex flex-col min-h-[520px] h-[min(72vh,720px)]">
-          {notesEditor}
+
+        {/* 中央：議程筆記（視覺主角，吃掉剩餘寬度） */}
+        <div className="flex-1 min-w-0 min-h-0 h-full bg-white border border-navy-800/8 rounded-3xl shadow-card overflow-hidden flex flex-col">
+          {notesPanel}
         </div>
-        <div className="hidden xl:flex flex-col gap-5 min-h-[520px] h-[min(72vh,720px)]">
-          <div className="flex-1 min-h-0">{transcriptWall}</div>
-          <div className="shrink-0 max-h-[42%] overflow-y-auto">{sidebarPanel}</div>
+
+        {/* 右側：逐字稿（吃剩餘高度）+ 精簡議程計時卡（高度自適應） */}
+        <div className="hidden xl:flex w-72 shrink-0 min-h-0 h-full flex-col gap-3 overflow-hidden">
+          <div className="flex-1 min-h-0 overflow-hidden">{transcriptWall}</div>
+          <div className="shrink-0">{sidebarPanel}</div>
         </div>
       </div>
-      <div className="hidden lg:block xl:hidden mt-5">{sidebarPanel}</div>
+
+      {/* lg 但非 xl：逐字稿＋精簡計時卡置底 */}
+      <div className="hidden lg:flex xl:hidden shrink-0 gap-3 mt-3 items-stretch">
+        <div className="flex-1 min-h-0 max-h-[22vh] overflow-hidden">{transcriptWall}</div>
+        <div className="w-64 shrink-0">{sidebarPanel}</div>
+      </div>
 
       {/* 與會者完整名單毛玻璃 Modal（頭像 +N 點擊） */}
       {rosterModalOpen && (
@@ -2842,6 +2800,8 @@ export default function LiveRoom({ meeting, store, go, social, me, onAgendaChang
           </div>
         </div>
       )}
+
+      {/* 語音 Ask AI 已內嵌於筆記卡片底部工具列（結束會議按鈕上方）；私密頁改用 @ai */}
     </div>
   );
 }

@@ -1,25 +1,26 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { ChevronDown, Lock } from "lucide-react";
-import Avatar from "../components/Avatar.jsx";
+import { ChevronDown, FileText } from "lucide-react";
+import ActionItemsTable from "../components/ActionItemsTable.jsx";
 import PainPointsList from "../components/PainPointsList.jsx";
+import MeetingAnalytics from "../components/MeetingAnalytics.jsx";
+import { SummaryTabs } from "./PrivateSummaryTab.jsx";
+import { loadCornell } from "../components/MeetingNotesContainer.jsx";
 import { extractReview } from "../lib/extract.js";
 import {
   formatTranscriptForAi,
   getCachedSummary,
   setCachedSummary,
 } from "../lib/meetingsCache.js";
+import { flattenNotesDoc } from "../lib/notesDocument.js";
+import {
+  normalizeAssignees,
+  withAssigneesFields,
+} from "../lib/assignees.js";
 import * as api from "../lib/api.js";
 
 const uid = () =>
   (globalThis.crypto?.randomUUID && globalThis.crypto.randomUUID()) ||
   `a-${Date.now().toString(36)}${Math.random().toString(36).slice(2, 7)}`;
-
-const avatarColor = (name) => {
-  const colors = ["bg-mint-500", "bg-coral-400", "bg-navy-600", "bg-sky-400"];
-  let h = 0;
-  for (const ch of name || "") h = (h + ch.charCodeAt(0)) % colors.length;
-  return colors[h];
-};
 
 /** 解析會議創辦人顯示名稱（不可從認領名單漏掉 Host） */
 function resolveHostName(meeting, me) {
@@ -35,7 +36,7 @@ function resolveHostName(meeting, me) {
   return "";
 }
 
-/** AI 只提議 text；合併舊認領／完成狀態，避免重新分析洗掉 who */
+/** AI 只提議 text；合併舊認領／完成狀態，避免重新分析洗掉 assignees */
 function toStoreShape(payload, prevActions = []) {
   const prevByTask = new Map(
     (prevActions || []).map((a) => [String(a.task || a.text || "").trim(), a])
@@ -43,10 +44,11 @@ function toStoreShape(payload, prevActions = []) {
   const actions = (payload.actionItems || []).map((it) => {
     const text = String(it.text || "").trim();
     const prev = prevByTask.get(text);
+    const assignees = normalizeAssignees(prev);
     return {
       id: prev?.id || uid(),
       task: text,
-      who: prev?.who || "",
+      ...withAssigneesFields(assignees),
       when: prev?.when || "",
       done: Boolean(prev?.done),
     };
@@ -106,146 +108,77 @@ function AICard({ tone, icon, title, items, empty, loading }) {
   );
 }
 
-function ActionSkeleton() {
-  return (
-    <div className="px-6 py-5 space-y-3">
-      {[0, 1, 2].map((i) => (
-        <div key={i} className="flex items-center gap-3">
-          <div className="h-5 w-5 animate-pulse rounded-md bg-gray-200/50" />
-          <div className="h-4 flex-1 animate-pulse rounded-xl bg-gray-200/50" />
-          <div className="h-8 w-28 animate-pulse rounded-xl bg-gray-200/50" />
-        </div>
-      ))}
-    </div>
-  );
-}
-
-/**
- * 動態認領／指派下拉
- * - 情境 A（isEditRestricted=false）：只能選「未認領」或自己
- * - 情境 B（isEditRestricted=true）：Host 可指派任何人；非 Host 整顆鎖定唯讀
- */
-function ClaimSelect({
-  value,
-  allPeople,
-  selectablePeople,
-  locked,
-  onChange,
-  hint,
-}) {
+/* 附錄：Notion 風格可摺疊原始紀錄（預設收合，保持頁面乾淨） */
+function CollapsibleNotes({ label, sourceLabel, transcriptText, topicEntries = [], notes, people = [] }) {
   const [open, setOpen] = useState(false);
-  const rootRef = useRef(null);
-  const claimed = Boolean(value);
-
-  useEffect(() => {
-    if (!open) return undefined;
-    const onDoc = (e) => {
-      if (rootRef.current && !rootRef.current.contains(e.target)) setOpen(false);
-    };
-    document.addEventListener("mousedown", onDoc);
-    return () => document.removeEventListener("mousedown", onDoc);
-  }, [open]);
-
-  const canPick = (name) => selectablePeople.includes(name);
+  const hasContent = Boolean(
+    String(transcriptText || "").trim() || topicEntries.length || String(notes || "").trim()
+  );
 
   return (
-    <div className="relative min-w-[10.5rem]" ref={rootRef}>
+    <div className="bg-white border border-navy-800/8 rounded-3xl shadow-card overflow-hidden">
       <button
         type="button"
-        disabled={locked}
-        title={hint || undefined}
-        onClick={() => {
-          if (locked) return;
-          setOpen((v) => !v);
-        }}
-        className={`w-full flex items-center gap-2 rounded-xl border px-2.5 py-1.5 text-left shadow-[0_1px_0_rgba(15,27,45,0.04)] transition-colors ${
-          claimed
-            ? "border-mint-200/80 bg-gradient-to-b from-white to-mint-50/70 hover:border-mint-300"
-            : "border-navy-800/10 bg-gradient-to-b from-white to-slate-50/80 hover:border-mint-300"
-        } disabled:opacity-75 disabled:cursor-not-allowed disabled:hover:border-navy-800/10`}
-        aria-haspopup="listbox"
+        onClick={() => setOpen((o) => !o)}
         aria-expanded={open}
-        aria-disabled={locked}
+        className="w-full flex items-center gap-2 px-5 py-4 text-left hover:bg-navy-800/[0.02] transition-colors"
       >
-        {claimed ? (
-          <>
-            <Avatar name={value} color={avatarColor(value)} size="h-6 w-6" ring={false} />
-            <span className="min-w-0 flex-1 truncate text-xs font-semibold text-navy-700">
-              {value}
-            </span>
-          </>
-        ) : (
-          <span className="min-w-0 flex-1 text-xs font-semibold text-navy-400">未認領</span>
-        )}
-        {locked ? (
-          <Lock className="h-3.5 w-3.5 shrink-0 text-navy-300" strokeWidth={2.2} />
-        ) : (
+        <FileText className="h-4 w-4 shrink-0 text-navy-400" strokeWidth={2} />
+        <span className="text-sm font-bold text-navy-700">{label}</span>
+        <span className="hidden sm:inline text-[10px] font-bold text-mint-700 bg-mint-50 border border-mint-100 px-2 py-0.5 rounded-full">
+          AI 來源：{sourceLabel}
+        </span>
+        <span className="ml-auto flex items-center gap-1.5 shrink-0">
+          <span className="text-[11px] text-navy-400">{open ? "收合" : "展開"}</span>
           <ChevronDown
-            className={`h-3.5 w-3.5 shrink-0 text-navy-300 transition-transform ${
-              open ? "rotate-180" : ""
-            }`}
-            strokeWidth={2.2}
+            className={`h-4 w-4 text-navy-400 transition-transform duration-200 ${open ? "rotate-180" : ""}`}
+            strokeWidth={2.4}
           />
-        )}
+        </span>
       </button>
 
-      {open && !locked && (
-        <ul
-          role="listbox"
-          className="absolute z-20 mt-1.5 w-full min-w-[12rem] max-h-56 overflow-auto rounded-xl border border-navy-800/10 bg-white py-1 shadow-[0_8px_24px_rgba(15,27,45,0.12)]"
-        >
-          <li>
-            <button
-              type="button"
-              role="option"
-              className="w-full px-3 py-2 text-left text-xs font-medium text-navy-400 hover:bg-navy-800/[0.04]"
-              onClick={() => {
-                onChange("");
-                setOpen(false);
-              }}
-            >
-              未認領
-            </button>
-          </li>
-          {allPeople.map((name) => {
-            const enabled = canPick(name);
-            return (
-              <li key={name}>
-                <button
-                  type="button"
-                  role="option"
-                  disabled={!enabled}
-                  aria-selected={value === name}
-                  aria-disabled={!enabled}
-                  className={`w-full flex items-center gap-2 px-3 py-2 text-left transition-colors ${
-                    enabled ? "hover:bg-mint-50" : "opacity-75 cursor-not-allowed"
-                  } ${value === name ? "bg-mint-50/80" : ""}`}
-                  onClick={() => {
-                    if (!enabled) return;
-                    onChange(name);
-                    setOpen(false);
-                  }}
-                >
-                  <Avatar name={name} color={avatarColor(name)} size="h-6 w-6" ring={false} />
-                  <span className="text-xs font-semibold text-navy-700">{name}</span>
-                  {!enabled && (
-                    <span className="ml-auto text-[10px] font-medium text-navy-300">不可選</span>
-                  )}
-                </button>
-              </li>
-            );
-          })}
-          {allPeople.length === 0 && (
-            <li className="px-3 py-2 text-[11px] text-navy-300">尚無可選成員</li>
+      {open && (
+        <div className="border-t border-navy-800/6">
+          {String(transcriptText || "").trim() ? (
+            <pre className="px-5 py-4 text-sm text-navy-600 leading-relaxed whitespace-pre-wrap font-sans max-h-[28rem] overflow-y-auto">
+              {transcriptText}
+            </pre>
+          ) : topicEntries.length ? (
+            <div className="px-5 py-4 space-y-4 max-h-[28rem] overflow-y-auto">
+              {topicEntries.map(([t, text]) => (
+                <div key={t}>
+                  <p className="text-xs font-bold text-mint-700 bg-mint-50 inline-block px-2 py-0.5 rounded-md">{t}</p>
+                  <pre className="mt-1.5 text-sm text-navy-600 leading-relaxed whitespace-pre-wrap font-sans">
+                    {text}
+                  </pre>
+                </div>
+              ))}
+            </div>
+          ) : String(notes || "").trim() ? (
+            <pre className="px-5 py-4 text-sm text-navy-600 leading-relaxed whitespace-pre-wrap font-sans">
+              {notes}
+            </pre>
+          ) : (
+            <p className="px-5 py-8 text-sm text-navy-300 text-center">這場會議沒有留下筆記。</p>
           )}
-        </ul>
+
+          {people.length > 0 && (
+            <div className="px-5 py-3 border-t border-navy-800/6 text-xs text-navy-300">
+              認領名單（含 Host）：{people.join("、")}
+            </div>
+          )}
+        </div>
+      )}
+
+      {!open && !hasContent && (
+        <p className="px-5 pb-4 -mt-2 text-[11px] text-navy-300">這場會議沒有留下筆記。</p>
       )}
     </div>
   );
 }
 
 /**
- * 會後 AI 整理：進頁自動呼叫後端 Gemini；待辦依 RBAC 切換「認領／指派」。
+ * 會後 AI 整理：進頁自動呼叫後端 Gemini；待辦支援完整 CRUD 與 RBAC 認領。
  */
 export default function MeetingSummary({
   meeting,
@@ -256,7 +189,6 @@ export default function MeetingSummary({
 }) {
   const [isLoading, setIsLoading] = useState(true);
   const [statusMsg, setStatusMsg] = useState(null);
-  const [copied, setCopied] = useState(null);
   const ranForRef = useRef(null);
 
   /** 與 LiveRoom / 建立會議的「上下級編輯限制」打通（存在 meeting.rbac） */
@@ -285,7 +217,9 @@ export default function MeetingSummary({
 
   const topicEntries = useMemo(
     () =>
-      Object.entries(meeting.topicNotes || {}).filter(([, v]) => (v || "").trim()),
+      Object.entries(meeting.topicNotes || {})
+        .map(([t, raw]) => [t, flattenNotesDoc(raw || "")])
+        .filter(([, v]) => (v || "").trim()),
     [meeting.topicNotes]
   );
 
@@ -415,7 +349,7 @@ export default function MeetingSummary({
         const fallback = extractReview(notesForAi, allPeople);
         const actions = (fallback.actions || []).map((a) => ({
           ...a,
-          who: "",
+          ...withAssigneesFields([]),
         }));
         setCachedSummary(meeting.id, notesForAi, {
           review: fallback,
@@ -453,29 +387,122 @@ export default function MeetingSummary({
     generateSummary();
   }, [generateSummary, meeting.id, notesForAi]);
 
+  const patchActions = async (updater) => {
+    await store.updateMeeting(meeting.id, (m) => {
+      const prev = Array.isArray(m.actions) ? m.actions : [];
+      const next = updater(prev);
+      return {
+        actions: next,
+        review: {
+          ...(m.review || {}),
+          actions: next,
+        },
+      };
+    });
+  };
+
   const toggleDone = async (aid) => {
-    await store.updateMeeting(meeting.id, (m) => ({
-      actions: (m.actions || []).map((a) => (a.id === aid ? { ...a, done: !a.done } : a)),
-    }));
+    await patchActions((list) =>
+      list.map((a) => (a.id === aid ? { ...a, done: !a.done } : a))
+    );
   };
 
-  const claimAction = async (aid, who) => {
-    // 前端雙重保險：共編只能認領自己；嚴格模式非 Host 不可改
+  const claimAction = async (aid, assignees) => {
     if (isEditRestricted && currentRole !== "host") return;
-    if (!isEditRestricted && who && who !== myName) return;
-    await store.updateMeeting(meeting.id, (m) => ({
-      actions: (m.actions || []).map((a) => (a.id === aid ? { ...a, who } : a)),
-    }));
+    const next = normalizeAssignees(assignees);
+    if (!isEditRestricted) {
+      const prev = normalizeAssignees(actions.find((a) => a.id === aid));
+      const added = next.filter((n) => !prev.includes(n));
+      const removed = prev.filter((n) => !next.includes(n));
+      if (added.some((n) => n !== myName) || removed.some((n) => n !== myName)) return;
+    }
+    await patchActions((list) =>
+      list.map((a) => (a.id === aid ? { ...a, ...withAssigneesFields(next) } : a))
+    );
   };
 
-  const copyItem = (a) => {
-    const text = `[ ] ${a.task}${a.who ? ` （負責：${a.who}` : ""}${
-      a.when ? `${a.who ? "，" : " （"}截止：${a.when}` : ""
-    }${a.who || a.when ? "）" : ""}`;
-    navigator.clipboard?.writeText(text);
-    setCopied(a.id);
-    setTimeout(() => setCopied(null), 1400);
+  const updateTask = async (aid, task) => {
+    if (isEditRestricted && currentRole !== "host") return;
+    const text = String(task || "").trim();
+    if (!text) return;
+    await patchActions((list) =>
+      list.map((a) => (a.id === aid ? { ...a, task: text } : a))
+    );
   };
+
+  const addAction = async ({ task, assignees }) => {
+    if (isEditRestricted && currentRole !== "host") return;
+    const text = String(task || "").trim();
+    if (!text) return;
+    const item = {
+      id: uid(),
+      task: text,
+      ...withAssigneesFields(assignees),
+      when: "",
+      done: false,
+    };
+    await patchActions((list) => [...list, item]);
+  };
+
+  const deleteAction = async (aid) => {
+    if (isEditRestricted && currentRole !== "host") return;
+    await patchActions((list) => list.filter((a) => a.id !== aid));
+  };
+
+  const canMutateTasks = !(isEditRestricted && currentRole !== "host");
+
+  /* ── 個人私密康乃爾筆記 + AI 個人化洞察 ──────────────────────────────────
+     ⚠ 隱私：cornell 只從本機 localStorage 讀取，insights 只存在本元件 state。
+       兩者【絕不】寫回 meeting，也不經 socket 廣播——meeting 會同步給所有成員。 */
+  const cornellUserKey = me?.id || me?.name;
+  const myCornell = useMemo(
+    () => loadCornell(cornellUserKey, meeting.id),
+    [cornellUserKey, meeting.id]
+  );
+  const [privateState, setPrivateState] = useState({
+    loading: false,
+    loaded: false,
+    privateActions: [],
+    insights: [],
+    message: "",
+  });
+
+  const runPrivateInsights = useCallback(async () => {
+    setPrivateState((s) => ({ ...s, loading: true, loaded: true, message: "" }));
+    try {
+      const r = await api.fetchPrivateInsights(meeting.id, { cornell: myCornell, mode });
+      setPrivateState({
+        loading: false,
+        loaded: true,
+        privateActions: r.privateActions || [],
+        insights: r.insights || [],
+        message: r.message || "",
+      });
+    } catch (e) {
+      setPrivateState({
+        loading: false,
+        loaded: true,
+        privateActions: [],
+        insights: [],
+        message: `個人化分析失敗：${e?.message || "請稍後再試"}`,
+      });
+    }
+  }, [meeting.id, myCornell, mode]);
+
+  const togglePrivateAction = useCallback((id) => {
+    setPrivateState((s) => ({
+      ...s,
+      privateActions: s.privateActions.map((a) => (a.id === id ? { ...a, done: !a.done } : a)),
+    }));
+  }, []);
+
+  /** 切到私密分頁才打 API，避免每個人開摘要都燒 Token */
+  const handleSummaryTab = useCallback(
+    (tab) => {
+      if (tab === "private" && !privateState.loaded) runPrivateInsights();
+    },
+    [privateState.loaded, runPrivateInsights]
+  );
 
   return (
     <div className="fade-in max-w-7xl mx-auto px-4 py-6 md:px-6 md:py-8">
@@ -532,6 +559,27 @@ export default function MeetingSummary({
         )}
       </div>
 
+      <SummaryTabs
+        className="mt-5"
+        onTabChange={handleSummaryTab}
+        privateProps={{
+          cornell: myCornell,
+          privateActions: privateState.privateActions,
+          insights: privateState.insights,
+          loading: privateState.loading,
+          message: privateState.message,
+          onRetry: privateState.loading ? undefined : runPrivateInsights,
+          onToggleAction: togglePrivateAction,
+        }}
+      >
+      {/* 簡報式量化摘要：核心結論 / KPI / 發言比重 / 議題分布 / 痛點→決策 / 風險矩陣 */}
+      <MeetingAnalytics
+        meeting={meeting}
+        review={review}
+        actions={actions}
+        durationMin={durationMin}
+      />
+
       {meeting.pains?.length > 0 && (
         <div className="mt-6">
           <PainPointsList pains={meeting.pains} />
@@ -541,182 +589,44 @@ export default function MeetingSummary({
         </div>
       )}
 
-      <div className="grid grid-cols-1 lg:grid-cols-2 gap-6 mt-6">
-        <div className="self-start bg-white border border-navy-800/8 rounded-3xl shadow-card overflow-hidden">
-          <div className="px-5 py-3.5 border-b border-navy-800/6 flex items-center justify-between gap-2">
-            <div className="flex items-center gap-2 text-sm font-bold text-navy-700">
-              <svg
-                viewBox="0 0 24 24"
-                className="h-4 w-4 text-navy-400"
-                fill="none"
-                stroke="currentColor"
-                strokeWidth="2"
-                strokeLinecap="round"
-                strokeLinejoin="round"
-              >
-                <path d="M14 2H6a2 2 0 00-2 2v16a2 2 0 002 2h12a2 2 0 002-2V8z M14 2v6h6" />
-              </svg>
-              {aiSourceLabel === "語音逐字稿" ? "會議語音逐字稿" : "會議原始口語筆記"}
-            </div>
-            <span className="text-[10px] font-bold text-mint-700 bg-mint-50 border border-mint-100 px-2 py-0.5 rounded-full">
-              AI 來源：{aiSourceLabel}
-            </span>
-          </div>
-          {aiSourceLabel === "語音逐字稿" && notesForAi.trim() ? (
-            <pre className="px-5 py-4 text-sm text-navy-600 leading-relaxed whitespace-pre-wrap font-sans max-h-[28rem] overflow-y-auto">
-              {notesForAi}
-            </pre>
-          ) : topicEntries.length ? (
-            <div className="px-5 py-4 space-y-4">
-              {topicEntries.map(([t, text]) => (
-                <div key={t}>
-                  <p className="text-xs font-bold text-mint-700 bg-mint-50 inline-block px-2 py-0.5 rounded-md">
-                    {t}
-                  </p>
-                  <pre className="mt-1.5 text-sm text-navy-600 leading-relaxed whitespace-pre-wrap font-sans">
-                    {text}
-                  </pre>
-                </div>
-              ))}
-            </div>
-          ) : (meeting.notes || "").trim() ? (
-            <pre className="px-5 py-4 text-sm text-navy-600 leading-relaxed whitespace-pre-wrap font-sans">
-              {meeting.notes}
-            </pre>
-          ) : (
-            <p className="px-5 py-8 text-sm text-navy-300 text-center">這場會議沒有留下筆記。</p>
-          )}
-          {allPeople.length > 0 && (
-            <div className="px-5 py-3 border-t border-navy-800/6 text-xs text-navy-300">
-              認領名單（含 Host）：{allPeople.join("、")}
-            </div>
-          )}
-        </div>
 
-        <div className="space-y-4">
-          <AICard
-            tone="blue"
-            icon=""
-            title="靈感 / 點子"
-            items={review.ideas || []}
-            empty="筆記中未偵測到明顯的點子。"
-            loading={isLoading}
-          />
-          <AICard
-            tone="green"
-            icon=""
-            title="決議事項"
-            items={review.decisions || []}
-            empty="筆記中未偵測到明確決議。"
-            loading={isLoading}
-          />
-          <AICard
-            tone="coral"
-            icon=""
-            title="潛在風險"
-            items={review.risks || []}
-            empty="太好了，沒有偵測到明顯風險。"
-            loading={isLoading}
-          />
-        </div>
+      <ActionItemsTable
+        actions={actions}
+        loading={isLoading}
+        allPeople={allPeople}
+        selectablePeople={selectablePeople}
+        selectLocked={selectLocked}
+        selectHint={selectHint}
+        canMutateTasks={canMutateTasks}
+        onToggleDone={toggleDone}
+        onClaim={claimAction}
+        onUpdateTask={updateTask}
+        onAdd={addAction}
+        onDelete={deleteAction}
+      />
+
+      {/* ── 附錄：備選提案 + 可摺疊原始紀錄 ── */}
+      <div className="mt-6 space-y-4">
+        <AICard
+          tone="blue"
+          icon=""
+          title="備選方案與未採納提案"
+          items={review.ideas || []}
+          empty="本場沒有額外的備選提案。"
+          loading={isLoading}
+        />
+
+        <CollapsibleNotes
+          label={aiSourceLabel === "語音逐字稿" ? "會議語音逐字稿" : "會議原始紀錄"}
+          sourceLabel={aiSourceLabel}
+          transcriptText={aiSourceLabel === "語音逐字稿" ? notesForAi : ""}
+          topicEntries={topicEntries}
+          notes={meeting.notes}
+          people={allPeople}
+        />
       </div>
+      </SummaryTabs>
 
-      <div className="mt-8 bg-white border border-navy-800/8 rounded-3xl shadow-card overflow-hidden">
-        <div className="px-6 py-4 border-b border-navy-800/6 flex items-center justify-between gap-3 flex-wrap">
-          <h2 className="font-black text-navy-800 flex items-center gap-2">
-            <span className="text-mint-500">✓</span> 待辦事項 Action Items
-            {!isLoading && (
-              <span className="text-xs font-semibold text-navy-400 bg-navy-800/5 px-2 py-0.5 rounded-full">
-                {actions.length} 項
-              </span>
-            )}
-          </h2>
-          <p className="text-[11px] text-navy-400">{selectHint}</p>
-        </div>
-
-        {isLoading ? (
-          <ActionSkeleton />
-        ) : actions.length === 0 ? (
-          <p className="px-6 py-10 text-sm text-navy-300 text-center">
-            這次沒有可認領的待辦。若筆記資訊量不足，請回到會議室補充後再進入本頁。
-          </p>
-        ) : (
-          <div className="overflow-x-auto">
-            <table className="w-full text-sm">
-              <thead>
-                <tr className="text-left text-xs font-bold text-navy-400 bg-navy-800/[0.02]">
-                  <th className="px-6 py-3 w-8" />
-                  <th className="px-2 py-3">待辦內容</th>
-                  <th className="px-4 py-3">負責人 Who</th>
-                  <th className="px-4 py-3 text-right">操作</th>
-                </tr>
-              </thead>
-              <tbody>
-                {actions.map((a) => (
-                  <tr
-                    key={a.id}
-                    className={`border-t border-navy-800/6 transition-colors ${
-                      a.done ? "opacity-50" : "hover:bg-mint-50/30"
-                    }`}
-                  >
-                    <td className="px-6 py-4">
-                      <button
-                        type="button"
-                        onClick={() => toggleDone(a.id)}
-                        className={`h-5 w-5 rounded-md border flex items-center justify-center transition-colors ${
-                          a.done
-                            ? "bg-mint-500 border-mint-500 text-white"
-                            : "border-navy-800/20 hover:border-mint-400"
-                        }`}
-                      >
-                        {a.done && (
-                          <svg
-                            viewBox="0 0 24 24"
-                            className="h-3 w-3"
-                            fill="none"
-                            stroke="currentColor"
-                            strokeWidth="3.2"
-                            strokeLinecap="round"
-                            strokeLinejoin="round"
-                          >
-                            <path d="M5 12.5l4 4 10-10" />
-                          </svg>
-                        )}
-                      </button>
-                    </td>
-                    <td
-                      className={`px-2 py-4 font-semibold text-navy-800 ${
-                        a.done ? "line-through" : ""
-                      }`}
-                    >
-                      {a.task}
-                    </td>
-                    <td className="px-4 py-4">
-                      <ClaimSelect
-                        value={a.who || ""}
-                        allPeople={allPeople}
-                        selectablePeople={selectablePeople}
-                        locked={selectLocked || a.done}
-                        hint={a.done ? "已完成項目不可改認領" : selectHint}
-                        onChange={(who) => claimAction(a.id, who)}
-                      />
-                    </td>
-                    <td className="px-4 py-4 text-right">
-                      <button
-                        type="button"
-                        onClick={() => copyItem(a)}
-                        className="text-xs font-semibold text-navy-600 border border-navy-800/10 px-2.5 py-1.5 rounded-lg hover:border-mint-300 hover:text-mint-600 transition-colors"
-                      >
-                        {copied === a.id ? "已複製 ✓" : "複製"}
-                      </button>
-                    </td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
-        )}
-      </div>
     </div>
   );
 }

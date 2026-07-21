@@ -1,8 +1,9 @@
+import { ensureDb } from "./db.js";
+import { createFirestoreSocial } from "./firestoreStores.js";
 import fs from "fs/promises";
 import path from "path";
 import { fileURLToPath } from "url";
 import mongoose from "mongoose";
-import { ensureDb } from "./db.js";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const DATA_DIR = path.join(__dirname, "data");
@@ -234,6 +235,10 @@ function createMongoSocial() {
 
 export async function createSocialStore() {
   const db = await ensureDb();
+  if (db.mode === "firestore") {
+    console.log("[social-store] 好友 / 邀請使用 Firestore");
+    return createFirestoreSocial();
+  }
   if (db.mode === "mongodb") {
     console.log("[social-store] 好友 / 邀請使用 MongoDB");
     return createMongoSocial();

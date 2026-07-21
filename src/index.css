@@ -105,6 +105,43 @@ html.dark {
   }
 }
 
+/**
+ * 筆記編輯器 @ai 高亮 token
+ * 必須與底層 textarea 字寬完全一致（禁止 padding / bold / inline-block），
+ * 否則 caret 會視覺偏移。徽章感改用 box-shadow，不佔 layout 寬度。
+ */
+.mf-at-ai-token {
+  display: inline;
+  font: inherit;
+  font-weight: inherit;
+  letter-spacing: inherit;
+  color: #0369a1;
+  background-color: rgba(14, 165, 233, 0.16);
+  border-radius: 0.25rem;
+  /* 視覺「徽章」外擴，不擠壓後續字元 */
+  box-shadow: 0 0 0 2px rgba(14, 165, 233, 0.16);
+  -webkit-box-decoration-break: clone;
+  box-decoration-break: clone;
+  user-select: none;
+  -webkit-user-select: none;
+}
+
+/* 筆記雙層輸入：backdrop 與 textarea 共用度量 */
+.mf-notes-layer {
+  margin: 0;
+  padding: 0;
+  border: 0;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono",
+    "Courier New", monospace;
+  font-size: 0.875rem;
+  line-height: 1.625;
+  letter-spacing: normal;
+  tab-size: 2;
+  white-space: pre-wrap;
+  word-wrap: break-word;
+  overflow-wrap: break-word;
+}
+
 .pulse-ring {
   animation: pulseRing 2s ease-in-out infinite;
 }

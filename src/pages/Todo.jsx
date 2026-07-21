@@ -1,6 +1,10 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { Check, Plus, Trash2 } from "lucide-react";
 import Avatar from "../components/Avatar.jsx";
+import {
+  formatAssigneesLabel,
+  normalizeAssignees,
+} from "../lib/assignees.js";
 import { getStoredUser } from "../lib/session.js";
 
 const avatarColor = (name) => {
@@ -266,10 +270,25 @@ function TodoRow({
             </div>
           </div>
 
-          {item.who && (
-            <span className="hidden sm:inline-flex items-center gap-1.5">
-              <Avatar name={item.who} color={avatarColor(item.who)} size="h-6 w-6" ring={false} />
-              <span className="text-xs font-medium text-navy-600">{item.who}</span>
+          {item.assignees?.length > 0 && (
+            <span
+              className="hidden sm:inline-flex items-center gap-1.5"
+              title={formatAssigneesLabel(item.assignees)}
+            >
+              <span className="flex -space-x-1.5">
+                {item.assignees.slice(0, 3).map((name) => (
+                  <Avatar
+                    key={name}
+                    name={name}
+                    color={avatarColor(name)}
+                    size="h-6 w-6"
+                    ring={false}
+                  />
+                ))}
+              </span>
+              <span className="text-xs font-medium text-navy-600 max-w-[7rem] truncate">
+                {formatAssigneesLabel(item.assignees)}
+              </span>
             </span>
           )}
           {item.when && (
@@ -379,7 +398,7 @@ export default function Todo({ meetings, store, go }) {
           type: "meeting",
           meetingId: m.id,
           meetingTitle: m.title,
-          who: a.who,
+          assignees: normalizeAssignees(a),
           when: a.when,
         });
       }

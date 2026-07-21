@@ -7,3 +7,5 @@ dist-ssr
 .env.*
 !.env.example
 data/
+secrets/
+**/firebase-adminsdk*.json

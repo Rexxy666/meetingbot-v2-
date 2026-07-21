@@ -51,7 +51,14 @@ export function extractReview(notes, participants = []) {
     const who = findWho(line, participants);
     const when = findWhen(line);
     if (who || when || ACTION_RE.test(line)) {
-      actions.push({ id: uid(), task: line, who, when, done: false });
+      actions.push({
+        id: uid(),
+        task: line,
+        who: who || "",
+        assignees: who ? [who] : [],
+        when,
+        done: false,
+      });
     }
   }
 

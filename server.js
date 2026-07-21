@@ -6,13 +6,19 @@ import { Server } from "socket.io";
 import { authRequired, createAuthStore, socketAuth } from "./authStore.js";
 import { createMeetingsStore } from "./meetingsStore.js";
 import { createSocialStore } from "./socialStore.js";
-import { geminiConfigured, summarizeMeetingNotes } from "./geminiService.js";
+import {
+  geminiConfigured,
+  summarizeMeetingNotes,
+  generatePrivateInsights,
+  answerLiveSilentAsk,
+} from "./geminiService.js";
 import {
   agendaSelectSchema,
   createMeetingSchema,
   idParamSchema,
   inviteUserSocketSchema,
   joinMeetingSocketSchema,
+  liveAskSchema,
   loginSchema,
   meetingKickSchema,
   meetingPatchInputSchema,
@@ -188,6 +194,60 @@ async function main() {
     }
   });
 
+  /** 會中靜音問答：語音問題 + 近 5 分鐘脈絡 → 純文字答案（無 TTS） */
+  app.post("/api/ai/ask", requireAuth, async (req, res) => {
+    try {
+      const body = parseOrThrow(liveAskSchema, req.body, "會中 AI 問答");
+      const result = await answerLiveSilentAsk(body);
+      res.json(result);
+    } catch (e) {
+      console.error("[api/ai/ask]", e?.message || e);
+      sendErr(res, e, "AI 問答失敗");
+    }
+  });
+
+  /* ── AI：個人化私密洞察 ────────────────────────────────────────────────────
+     ⚠ 隱私：康乃爾筆記由前端隨請求送出，伺服器【不落地儲存】、
+       結果只回給發話者，絕不寫入 meeting（meeting 會同步給所有 memberIds）。 */
+  app.post("/api/meetings/:id/private-insights", requireAuth, async (req, res) => {
+    try {
+      const id = parseOrThrow(idParamSchema, req.params.id, "會議 ID");
+      const meeting = await store.getAccessible(id, req.user.id);
+      if (!meeting) return res.status(404).json({ error: "找不到此會議" });
+
+      const c = req.body?.cornell || {};
+      const cornell = {
+        cue: String(c.cue || "").slice(0, 5000),
+        notes: String(c.notes || "").slice(0, 20000),
+        summary: String(c.summary || "").slice(0, 5000),
+      };
+
+      const transcript =
+        meeting.transcriptText ||
+        (Array.isArray(meeting.transcript)
+          ? meeting.transcript.map((r) => `${r.speaker || "與會者"}：${r.text || ""}`).join("\n")
+          : "");
+      const groupNotes =
+        meeting.topicNotes && typeof meeting.topicNotes === "object"
+          ? Object.entries(meeting.topicNotes)
+              .map(([topic, text]) => `# ${topic}\n${text}`)
+              .join("\n\n")
+          : meeting.notes || "";
+
+      const result = await generatePrivateInsights({
+        cornell,
+        transcript,
+        groupNotes,
+        title: meeting.title,
+        mode: req.body?.mode || meeting.mode,
+      });
+      res.json(result);
+    } catch (e) {
+      console.error("[api/private-insights]", e?.message || e);
+      sendErr(res, e, "個人化分析失敗");
+    }
+  });
+
   // ── Auth ──────────────────────────────────────────────────────────────────
 
   app.post("/api/auth/register", async (req, res) => {
@@ -207,6 +267,29 @@ async function main() {
       res.json(result);
     } catch (e) {
       sendErr(res, e, "登入失敗");
+    }
+  });
+
+  /** Google / Firebase Auth：前端帶 idToken，後端驗證後簽發既有 JWT */
+  app.post("/api/auth/google", async (req, res) => {
+    try {
+      const idToken = String(req.body?.idToken || "").trim();
+      if (!idToken) {
+        return res.status(400).json({ error: "缺少 idToken" });
+      }
+      const { verifyFirebaseIdToken } = await import("./firebaseAdmin.js");
+      const decoded = await verifyFirebaseIdToken(idToken);
+      if (typeof authStore.loginWithGoogle !== "function") {
+        return res.status(503).json({ error: "此儲存層尚未支援 Google 登入" });
+      }
+      const result = await authStore.loginWithGoogle({
+        firebaseUid: decoded.uid,
+        email: decoded.email,
+        name: decoded.name || decoded.email?.split("@")[0] || "使用者",
+      });
+      res.json(result);
+    } catch (e) {
+      sendErr(res, e, "Google 登入失敗");
     }
   });
 

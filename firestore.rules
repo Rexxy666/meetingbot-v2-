@@ -1,0 +1,9 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+    // 預設拒絕客戶端直連；資料由 Render 後端用 Admin SDK 讀寫
+    match /{document=**} {
+      allow read, write: if false;
+    }
+  }
+}

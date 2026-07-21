@@ -1,10 +1,11 @@
-import bcrypt from "bcryptjs";
+import { ensureDb } from "./db.js";
+import { createFirestoreAuth, upsertGoogleUser } from "./firestoreStores.js";
 import fs from "fs/promises";
-import jwt from "jsonwebtoken";
 import path from "path";
 import { fileURLToPath } from "url";
+import bcrypt from "bcryptjs";
+import jwt from "jsonwebtoken";
 import mongoose from "mongoose";
-import { ensureDb } from "./db.js";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const DATA_DIR = path.join(__dirname, "data");
@@ -18,7 +19,9 @@ const userSchema = new mongoose.Schema(
     id: { type: String, required: true, unique: true, index: true },
     email: { type: String, required: true, unique: true, lowercase: true, trim: true },
     name: { type: String, required: true, trim: true },
-    passwordHash: { type: String, required: true },
+    passwordHash: { type: String, default: "" },
+    firebaseUid: { type: String, default: "", index: true },
+    authProvider: { type: String, default: "password" },
     createdAt: { type: Number, default: () => Date.now() },
   },
   { versionKey: false }
@@ -32,10 +35,15 @@ const uid = () =>
 
 function publicUser(u) {
   if (!u) return null;
-  return { id: u.id, email: u.email, name: u.name, createdAt: u.createdAt };
+  return {
+    id: u.id,
+    email: u.email,
+    name: u.name,
+    createdAt: u.createdAt,
+    authProvider: u.authProvider || "password",
+  };
 }
 
-/** 依 id／email 去重，避免同一好友在列表出現多次 */
 function dedupeUsers(list) {
   if (!Array.isArray(list)) return [];
   const byId = new Map();
@@ -207,6 +215,29 @@ function createJsonAuth() {
       const set = new Set(ids || []);
       return dedupeUsers(users.filter((u) => set.has(u.id))).map(publicUser);
     },
+    async loginWithGoogle({ firebaseUid, email, name }) {
+      return upsertGoogleUser(
+        {
+          findByEmail: async (em) => {
+            const users = await load();
+            return users.find((u) => u.email === em) || null;
+          },
+          findByFirebaseUid: async (fuid) => {
+            const users = await load();
+            return users.find((u) => u.firebaseUid === fuid) || null;
+          },
+          saveUser: async (user) => {
+            const users = await load();
+            const idx = users.findIndex((u) => u.id === user.id);
+            if (idx >= 0) users[idx] = user;
+            else users.push(user);
+            await save();
+            return user;
+          },
+        },
+        { firebaseUid, email, name }
+      );
+    },
   };
 }
 
@@ -245,6 +276,9 @@ function createMongoAuth() {
       if (!user) {
         throw Object.assign(new Error("此 Email 尚未註冊，請先建立帳號"), { status: 404 });
       }
+      if (!user.passwordHash) {
+        throw Object.assign(new Error("此帳號請改用 Google 登入"), { status: 401 });
+      }
       if (!(await bcrypt.compare(password || "", user.passwordHash))) {
         throw Object.assign(new Error("密碼錯誤"), { status: 401 });
       }
@@ -281,11 +315,31 @@ function createMongoAuth() {
       const docs = await UserModel.find({ id: { $in: ids || [] } }).lean();
       return docs.map(publicUser);
     },
+    async loginWithGoogle({ firebaseUid, email, name }) {
+      return upsertGoogleUser(
+        {
+          findByEmail: async (em) => UserModel.findOne({ email: em }).lean(),
+          findByFirebaseUid: async (fuid) => UserModel.findOne({ firebaseUid: fuid }).lean(),
+          saveUser: async (user) => {
+            await UserModel.findOneAndUpdate({ id: user.id }, user, {
+              upsert: true,
+              setDefaultsOnInsert: true,
+            });
+            return user;
+          },
+        },
+        { firebaseUid, email, name }
+      );
+    },
   };
 }
 
 export async function createAuthStore() {
   const db = await ensureDb();
+  if (db.mode === "firestore") {
+    console.log("[auth-store] 使用者資料使用 Firestore");
+    return createFirestoreAuth();
+  }
   if (db.mode === "mongodb") {
     console.log("[auth-store] 使用者資料使用 MongoDB");
     return createMongoAuth();

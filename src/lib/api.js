@@ -102,6 +102,16 @@ export function login({ email, password }) {
   });
 }
 
+/** Firebase Google 登入：帶 Firebase ID Token 換後端 JWT */
+export function loginWithGoogle(idToken) {
+  return request("/api/auth/google", {
+    method: "POST",
+    skipAuth: true,
+    timeoutMs: 15000,
+    body: JSON.stringify({ idToken }),
+  });
+}
+
 export function fetchMe() {
   return request("/api/auth/me");
 }
@@ -194,6 +204,25 @@ export function joinMeetingByLink(meetingId) {
   return request(`/api/meetings/${meetingId}/join`, { method: "POST", body: JSON.stringify({}) });
 }
 
+/**
+ * 個人化私密洞察：把「自己的康乃爾筆記」送去後端做一次性分析。
+ * ⚠ 後端不落地儲存、結果只回給呼叫者，絕不寫入 meeting。
+ */
+export function fetchPrivateInsights(meetingId, { cornell, mode }) {
+  return request(`/api/meetings/${encodeURIComponent(meetingId)}/private-insights`, {
+    method: "POST",
+    timeoutMs: 90000,
+    body: JSON.stringify({
+      cornell: {
+        cue: String(cornell?.cue || ""),
+        notes: String(cornell?.notes || ""),
+        summary: String(cornell?.summary || ""),
+      },
+      mode: mode === "student" ? "student" : "enterprise",
+    }),
+  });
+}
+
 /** 透過後端 Gemini 整理會議筆記（API Key 留在伺服器） */
 export function summarizeNotes({ notes, participants, title, mode }) {
   return request("/api/ai/summarize", {
@@ -203,6 +232,23 @@ export function summarizeNotes({ notes, participants, title, mode }) {
       notes: String(notes || ""),
       participants: Array.isArray(participants) ? participants : [],
       title: String(title || ""),
+      mode: mode === "student" ? "student" : "enterprise",
+    }),
+  });
+}
+
+/**
+ * 會中靜音問答：語音轉文字問題 + 近 5 分鐘逐字稿 → 純文字答案（無 TTS）。
+ */
+export function askLiveSilentAi({ question, meetingTranscript, title, topic, mode }) {
+  return request("/api/ai/ask", {
+    method: "POST",
+    timeoutMs: 60000,
+    body: JSON.stringify({
+      question: String(question || ""),
+      meetingTranscript: String(meetingTranscript || ""),
+      title: String(title || ""),
+      topic: String(topic || ""),
       mode: mode === "student" ? "student" : "enterprise",
     }),
   });

@@ -80,6 +80,23 @@ export function useAuth() {
     return result.user;
   }, []);
 
+  const loginWithGoogle = useCallback(async () => {
+    const { getFirebaseAuth, getGoogleProvider, isFirebaseConfigured } = await import("./firebase.js");
+    if (!isFirebaseConfigured) {
+      throw new Error("尚未設定 Firebase（VITE_FIREBASE_* 環境變數）");
+    }
+    const { signInWithPopup } = await import("firebase/auth");
+    const auth = getFirebaseAuth();
+    const cred = await signInWithPopup(auth, getGoogleProvider());
+    const idToken = await cred.user.getIdToken();
+    const result = await api.loginWithGoogle(idToken);
+    setSession(result);
+    setUser(result.user);
+    setToken(result.token);
+    reconnectSocket();
+    return result.user;
+  }, []);
+
   const logout = useCallback(() => {
     clearSession();
     disconnectSocket();
@@ -126,6 +143,7 @@ export function useAuth() {
     isAuthenticated: Boolean(user && token),
     register,
     login,
+    loginWithGoogle,
     logout,
     updateProfile,
     resetLocalCache,

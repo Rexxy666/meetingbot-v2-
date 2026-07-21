@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from "react";
+import { takeMediaHandoff } from "../lib/mediaSettings.js";
 
 function nowTime() {
   const now = new Date();
@@ -12,18 +13,18 @@ function getSpeechRecognitionCtor() {
 
 /**
  * 本機真實媒體 + Web Speech 即時 STT
- * - 鏡頭／麥克風：navigator.mediaDevices.getUserMedia
- * - 螢幕分享：navigator.mediaDevices.getDisplayMedia
- * - 逐字稿：瀏覽器 SpeechRecognition（Chrome / Edge 最穩；需麥克風權限）
+ * - 繼承 Green Room 的 mediaSettings / MediaStream handoff
  */
 export function useLocalMediaAndStt({
   enabled = true,
   speakerName = "與會者",
   lang = "zh-TW",
   onFinalUtterance,
+  initialMediaSettings = null,
 }) {
-  const [micOn, setMicOn] = useState(false);
-  const [camOn, setCamOn] = useState(false);
+  const initial = initialMediaSettings || {};
+  const [micOn, setMicOn] = useState(() => initial.isMuted === false);
+  const [camOn, setCamOn] = useState(() => initial.isVideoOff === false);
   const [screenSharing, setScreenSharing] = useState(false);
   const [mediaReady, setMediaReady] = useState(false);
   const [mediaError, setMediaError] = useState(null);
@@ -38,11 +39,17 @@ export function useLocalMediaAndStt({
   const localVideoRef = useRef(null);
   const screenVideoRef = useRef(null);
   const recognitionRef = useRef(null);
-  const wantMicRef = useRef(false);
-  const wantCamRef = useRef(false);
+  const wantMicRef = useRef(initial.isMuted === false);
+  const wantCamRef = useRef(initial.isVideoOff === false);
   const wantSttRef = useRef(false);
+  const devicePrefsRef = useRef({
+    micId: initial.selectedMic || "",
+    cameraId: initial.selectedCamera || "",
+    speakerId: initial.selectedSpeaker || "",
+  });
   const onFinalRef = useRef(onFinalUtterance);
   const speakerRef = useRef(speakerName);
+  const settingsRef = useRef(initialMediaSettings);
 
   useEffect(() => {
     onFinalRef.current = onFinalUtterance;
@@ -51,6 +58,17 @@ export function useLocalMediaAndStt({
   useEffect(() => {
     speakerRef.current = speakerName;
   }, [speakerName]);
+
+  useEffect(() => {
+    settingsRef.current = initialMediaSettings;
+    if (initialMediaSettings) {
+      devicePrefsRef.current = {
+        micId: initialMediaSettings.selectedMic || "",
+        cameraId: initialMediaSettings.selectedCamera || "",
+        speakerId: initialMediaSettings.selectedSpeaker || "",
+      };
+    }
+  }, [initialMediaSettings]);
 
   const attachLocalPreview = useCallback(() => {
     const video = localVideoRef.current;
@@ -61,6 +79,10 @@ export function useLocalMediaAndStt({
     }
     video.muted = true;
     video.playsInline = true;
+    const sinkId = devicePrefsRef.current.speakerId;
+    if (sinkId && typeof video.setSinkId === "function") {
+      video.setSinkId(sinkId).catch(() => {});
+    }
     const play = video.play();
     if (play?.catch) play.catch(() => {});
   }, []);
@@ -118,12 +140,14 @@ export function useLocalMediaAndStt({
         stopTracks(existing);
         camStreamRef.current = null;
       }
+      const { micId, cameraId } = devicePrefsRef.current;
       const stream = await navigator.mediaDevices.getUserMedia({
         audio: audio
           ? {
               echoCancellation: true,
               noiseSuppression: true,
               autoGainControl: true,
+              ...(micId ? { deviceId: { ideal: micId } } : {}),
             }
           : false,
         video: video
@@ -131,6 +155,7 @@ export function useLocalMediaAndStt({
               width: { ideal: 1280 },
               height: { ideal: 720 },
               facingMode: "user",
+              ...(cameraId ? { deviceId: { ideal: cameraId } } : {}),
             }
           : false,
       });
@@ -207,6 +232,7 @@ export function useLocalMediaAndStt({
           onFinalRef.current?.({
             id: `stt-${Date.now()}-${i}`,
             time: nowTime(),
+            at: Date.now(),
             speaker: speakerRef.current,
             text,
           });
@@ -257,8 +283,12 @@ export function useLocalMediaAndStt({
       wantMicRef.current = mic;
       wantCamRef.current = cam;
       try {
-        await ensureCameraStream({ audio: true, video: true });
-        applyTrackState();
+        if (mic || cam) {
+          await ensureCameraStream({ audio: true, video: true });
+          applyTrackState();
+        } else {
+          applyTrackState();
+        }
         if (mic) startSpeechRecognition();
         else stopSpeechRecognition();
       } catch (err) {
@@ -339,21 +369,47 @@ export function useLocalMediaAndStt({
     }
   }, [attachScreenPreview, screenSharing, stopScreenShare]);
 
-  // 進入會議後自動請求本機媒體（真實鏡頭／麥克風）
+  // 進入會議：優先接手大廳串流，並繼承開關（不再強制全開）
   useEffect(() => {
     if (!enabled) return undefined;
     const Ctor = getSpeechRecognitionCtor();
     setSttSupported(Boolean(Ctor));
     let cancelled = false;
     (async () => {
+      const handoff = takeMediaHandoff();
+      const settings = handoff.settings || settingsRef.current || {};
+      const wantMic = settings.isMuted === false;
+      const wantCam = settings.isVideoOff === false;
+      wantMicRef.current = wantMic;
+      wantCamRef.current = wantCam;
+      if (settings.selectedMic || settings.selectedCamera || settings.selectedSpeaker) {
+        devicePrefsRef.current = {
+          micId: settings.selectedMic || "",
+          cameraId: settings.selectedCamera || "",
+          speakerId: settings.selectedSpeaker || "",
+        };
+      }
+      setPermissionAsked(true);
       try {
-        wantMicRef.current = true;
-        wantCamRef.current = true;
-        setPermissionAsked(true);
-        await ensureCameraStream({ audio: true, video: true });
-        if (cancelled) return;
-        applyTrackState();
-        startSpeechRecognition();
+        if (handoff.stream) {
+          camStreamRef.current = handoff.stream;
+          setMediaReady(true);
+          applyTrackState();
+          if (wantMic) startSpeechRecognition();
+          else stopSpeechRecognition();
+          return;
+        }
+        if (wantMic || wantCam) {
+          await ensureCameraStream({ audio: true, video: true });
+          if (cancelled) return;
+          applyTrackState();
+          if (wantMic) startSpeechRecognition();
+          else stopSpeechRecognition();
+        } else {
+          setMicOn(false);
+          setCamOn(false);
+          setMediaReady(false);
+        }
       } catch (err) {
         if (cancelled) return;
         setMediaError(err?.message || "請允許鏡頭與麥克風權限");
@@ -368,11 +424,9 @@ export function useLocalMediaAndStt({
       stopScreenShare();
       stopCameraStream();
     };
-    // 僅在進／出會議時跑一次
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [enabled]);
 
-  // video DOM 掛載後重新綁定 stream
   useEffect(() => {
     if (camOn) attachLocalPreview();
   }, [camOn, attachLocalPreview, mediaReady]);
@@ -410,6 +464,8 @@ export function useLocalMediaAndStt({
     permissionAsked,
     localVideoRef: setLocalVideoNode,
     screenVideoRef: setScreenVideoNode,
+    getCameraStream: () => camStreamRef.current,
+    getScreenStream: () => screenStreamRef.current,
     startMedia,
     toggleMic,
     toggleCam,

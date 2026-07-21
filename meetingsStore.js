@@ -1,8 +1,9 @@
+import { ensureDb } from "./db.js";
+import { createFirestoreMeetings } from "./firestoreStores.js";
 import fs from "fs/promises";
 import path from "path";
 import { fileURLToPath } from "url";
 import mongoose from "mongoose";
-import { ensureDb } from "./db.js";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const DATA_DIR = path.join(__dirname, "data");
@@ -381,6 +382,10 @@ function createMongoStore() {
 
 export async function createMeetingsStore() {
   const db = await ensureDb();
+  if (db.mode === "firestore") {
+    console.log("[meetings-store] 使用 Firestore 持久化");
+    return createFirestoreMeetings();
+  }
   if (db.mode === "mongodb") {
     console.log("[meetings-store] 使用 MongoDB 持久化（依 ownerId 隔離）");
     return createMongoStore();

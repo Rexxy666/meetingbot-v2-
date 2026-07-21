@@ -59,6 +59,17 @@ export const summarizeSchema = z
   })
   .strip();
 
+/** 會中靜音 AI 問答（語音入、文字出；禁止 TTS） */
+export const liveAskSchema = z
+  .object({
+    question: z.string().min(1).max(2000),
+    meetingTranscript: z.string().max(80_000).default(""),
+    title: z.string().max(200).default(""),
+    topic: z.string().max(200).default(""),
+    mode: z.enum(["student", "enterprise"]).default("enterprise"),
+  })
+  .strip();
+
 const attendeeSchema = z
   .object({
     id: z.string().max(80).nullable().optional(),
