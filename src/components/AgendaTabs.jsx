@@ -19,7 +19,7 @@ export default function AgendaTabs({
 }) {
   return (
     <div
-      className={`flex gap-1 px-3 pt-2.5 md:pt-3 overflow-x-auto border-b border-navy-800/6 shrink-0 items-stretch ${className}`}
+      className={`flex gap-1 px-3 pt-2.5 md:pt-3 overflow-x-auto border-b border-navy-800/6 dark:border-slate-800/80 shrink-0 items-stretch ${className}`}
     >
       {agenda.map((a, i) => {
         const active = i === agendaIdx;
@@ -29,8 +29,8 @@ export default function AgendaTabs({
             key={`${i}-${a}`}
             className={`group relative shrink-0 flex items-center gap-0.5 rounded-t-lg transition-colors ${
               active
-                ? "bg-mint-50 text-mint-700 border-b-2 border-mint-500"
-                : "text-navy-400 hover:text-navy-700"
+                ? "bg-mint-50 text-mint-700 border-b-2 border-mint-500 dark:bg-cyan-500/15 dark:text-cyan-300 dark:border-cyan-400"
+                : "text-navy-400 hover:text-navy-700 dark:text-slate-400 dark:hover:text-slate-100"
             }`}
           >
             <button
@@ -91,7 +91,7 @@ export default function AgendaTabs({
           type="button"
           onClick={() => onRequestAdd?.()}
           title="新增議程"
-          className="shrink-0 inline-flex items-center gap-1 text-xs font-bold px-2.5 py-2 rounded-t-lg text-mint-700 hover:bg-mint-50 transition-colors"
+          className="shrink-0 inline-flex items-center gap-1 text-xs font-bold px-2.5 py-2 rounded-t-lg text-mint-700 hover:bg-mint-50 transition-colors dark:text-cyan-300 dark:hover:bg-cyan-500/10"
         >
           <Plus className="h-3.5 w-3.5" strokeWidth={2.6} />
           <span className="hidden sm:inline">新增議程</span>
@@ -181,7 +181,7 @@ function AgendaFormDialog({
             onChange={(e) => setName(e.target.value)}
             maxLength={80}
             placeholder="例：進度同步"
-            className="mt-1.5 w-full rounded-xl border border-navy-800/10 bg-white px-3 py-2.5 text-sm font-semibold text-navy-800 outline-none focus:border-mint-300 focus:ring-2 focus:ring-mint-100 dark:bg-slate-900/60 dark:border-slate-700 dark:text-slate-100"
+            className="mt-1.5 w-full rounded-xl border border-navy-800/10 bg-white px-3 py-2.5 text-sm font-semibold text-navy-800 outline-none focus:border-mint-300 focus:ring-2 focus:ring-mint-100 caret-navy-800 dark:bg-slate-900/60 dark:border-slate-700 dark:text-slate-100 dark:placeholder-slate-400 dark:caret-cyan-400"
           />
         </label>
         <label className="mt-3 block">
@@ -194,7 +194,7 @@ function AgendaFormDialog({
             max={480}
             value={minutes}
             onChange={(e) => setMinutes(e.target.value)}
-            className="mt-1.5 w-full rounded-xl border border-navy-800/10 bg-white px-3 py-2.5 text-sm font-semibold text-navy-800 outline-none focus:border-mint-300 focus:ring-2 focus:ring-mint-100 dark:bg-slate-900/60 dark:border-slate-700 dark:text-slate-100"
+            className="mt-1.5 w-full rounded-xl border border-navy-800/10 bg-white px-3 py-2.5 text-sm font-semibold text-navy-800 outline-none focus:border-mint-300 focus:ring-2 focus:ring-mint-100 caret-navy-800 dark:bg-slate-900/60 dark:border-slate-700 dark:text-slate-100 dark:caret-cyan-400"
           />
           <span className="mt-1 block text-[10px] text-navy-400 dark:text-slate-500">
             Time Boxing 預設 15 分鐘，切換到此議程時會套用倒數

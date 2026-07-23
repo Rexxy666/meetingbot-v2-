@@ -44,25 +44,25 @@ function ChatExchange({ item, onCopyToNotes, onRetry, copiedId }) {
   return (
     <div className="space-y-1.5">
       <div className="flex justify-end">
-        <div className="max-w-[85%] min-w-0 rounded-2xl rounded-br-md bg-blue-50 border border-blue-100 px-3 py-2">
-          <p className="text-[13px] text-navy-800 leading-relaxed whitespace-pre-wrap break-words">
+        <div className="max-w-[85%] min-w-0 rounded-2xl rounded-br-md bg-blue-50 border border-blue-100 px-3 py-2 dark:bg-sky-500/15 dark:border-sky-500/30">
+          <p className="text-[13px] text-navy-800 leading-relaxed whitespace-pre-wrap break-words dark:text-slate-100">
             {item.question}
           </p>
         </div>
       </div>
 
       <div className="flex justify-start">
-        <div className="max-w-[92%] min-w-[min(100%,280px)] rounded-2xl rounded-bl-md bg-white border border-navy-800/8 shadow-sm px-3 py-3">
+        <div className="max-w-[92%] min-w-[min(100%,280px)] rounded-2xl rounded-bl-md bg-white border border-navy-800/8 shadow-sm px-3 py-3 dark:bg-slate-900/60 dark:border-slate-800">
           <div className="flex items-center gap-1.5 mb-1.5">
-            <span className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-[10px] font-bold bg-sky-100 text-sky-700">
+            <span className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-[10px] font-bold bg-sky-100 text-sky-700 dark:bg-cyan-500/20 dark:text-cyan-300">
               <Bot className="h-3 w-3" strokeWidth={2.4} />
               AI
             </span>
             {item.status === "thinking" && (
-              <span className="text-[10px] font-semibold text-sky-600/80">思考中</span>
+              <span className="text-[10px] font-semibold text-sky-600/80 dark:text-cyan-400/90">思考中</span>
             )}
             {item.status === "streaming" && (
-              <span className="text-[10px] font-semibold text-sky-600/80">回覆中</span>
+              <span className="text-[10px] font-semibold text-sky-600/80 dark:text-cyan-400/90">回覆中</span>
             )}
             {item.status === "error" && (
               <span className="text-[10px] font-semibold text-coral-500">回覆失敗</span>
@@ -74,7 +74,7 @@ function ChatExchange({ item, onCopyToNotes, onRetry, copiedId }) {
                   type="button"
                   onClick={() => onRetry(item)}
                   title="重試"
-                  className="inline-flex items-center gap-1 h-6 px-2 rounded-lg text-[10px] font-bold text-coral-600 hover:bg-coral-50 transition-colors"
+                  className="inline-flex items-center gap-1 h-6 px-2 rounded-lg text-[10px] font-bold text-coral-600 hover:bg-coral-50 transition-colors dark:hover:bg-coral-500/10"
                 >
                   <RefreshCw className="h-3 w-3" strokeWidth={2.4} />
                   重試
@@ -87,8 +87,8 @@ function ChatExchange({ item, onCopyToNotes, onRetry, copiedId }) {
                   title="把這段回覆插入上方筆記"
                   className={`inline-flex items-center gap-1 h-6 px-2 rounded-lg text-[10px] font-bold transition-colors ${
                     copiedId === item.id
-                      ? "bg-mint-50 text-mint-700"
-                      : "text-navy-400 hover:text-mint-700 hover:bg-mint-50"
+                      ? "bg-mint-50 text-mint-700 dark:bg-mint-500/15 dark:text-mint-300"
+                      : "text-navy-400 hover:text-mint-700 hover:bg-mint-50 dark:text-slate-300 dark:hover:text-cyan-300 dark:hover:bg-slate-800"
                   }`}
                 >
                   <ClipboardCheck className="h-3 w-3" strokeWidth={2.4} />
@@ -103,14 +103,14 @@ function ChatExchange({ item, onCopyToNotes, onRetry, copiedId }) {
           ) : (
             <p
               className={`text-[13px] leading-relaxed whitespace-pre-wrap break-words ${
-                item.status === "error" ? "text-coral-600" : "text-navy-700"
+                item.status === "error" ? "text-coral-600" : "text-navy-700 dark:text-slate-200"
               }`}
             >
               {item.status === "error"
                 ? friendlyAiError(item.answer)
                 : item.answer || ""}
               {streaming && item.answer ? (
-                <span className="inline-block w-1 h-3.5 ml-0.5 bg-sky-500 animate-pulse align-middle" />
+                <span className="inline-block w-1 h-3.5 ml-0.5 bg-sky-500 animate-pulse align-middle dark:bg-cyan-400" />
               ) : null}
             </p>
           )}
@@ -164,7 +164,7 @@ export default function AIConversationPanel({
 
   return (
     <div
-      className={`shrink-0 border-t border-navy-800/8 bg-navy-800/[0.015] ${className}`}
+      className={`shrink-0 border-t border-navy-800/8 bg-navy-800/[0.015] dark:border-slate-800/80 dark:bg-slate-950/40 ${className}`}
     >
       {/* Header：收折狀態下就只有這一條 */}
       <div className="flex items-center gap-2 px-4 md:px-5 py-2">
@@ -174,17 +174,17 @@ export default function AIConversationPanel({
           aria-expanded={open}
           className="flex items-center gap-1.5 min-w-0 flex-1 text-left group"
         >
-          <span className="inline-flex items-center justify-center h-5 w-5 shrink-0 rounded-md bg-sky-100 text-sky-700">
+          <span className="inline-flex items-center justify-center h-5 w-5 shrink-0 rounded-md bg-sky-100 text-sky-700 dark:bg-cyan-500/20 dark:text-cyan-300">
             <Bot className="h-3 w-3" strokeWidth={2.4} />
           </span>
-          <span className="text-[11px] font-bold text-navy-600 group-hover:text-navy-800 transition-colors">
+          <span className="text-[11px] font-bold text-navy-600 group-hover:text-navy-800 transition-colors dark:text-slate-200 dark:group-hover:text-white">
             AI 助手
           </span>
-          <span className="text-[11px] font-semibold text-navy-400">（{count} 則對話）</span>
+          <span className="text-[11px] font-semibold text-navy-400 dark:text-slate-400">（{count} 則對話）</span>
           {busy && (
-            <span className="text-[10px] font-semibold text-sky-600/80 animate-pulse">回覆中…</span>
+            <span className="text-[10px] font-semibold text-sky-600/80 animate-pulse dark:text-cyan-400">回覆中…</span>
           )}
-          <span className="ml-1 text-navy-400 group-hover:text-navy-600 transition-colors">
+          <span className="ml-1 text-navy-400 group-hover:text-navy-600 transition-colors dark:text-slate-400 dark:group-hover:text-slate-200">
             {open ? (
               <ChevronDown className="h-3.5 w-3.5" strokeWidth={2.4} />
             ) : (
@@ -204,8 +204,8 @@ export default function AIConversationPanel({
           >
             {count === 0 ? (
               <div className="py-6 text-center">
-                <p className="text-[11px] font-semibold text-navy-500">還沒有任何提問</p>
-                <p className="mt-1 text-[10px] text-navy-400 leading-relaxed">
+                <p className="text-[11px] font-semibold text-navy-500 dark:text-slate-300">還沒有任何提問</p>
+                <p className="mt-1 text-[10px] text-navy-400 leading-relaxed dark:text-slate-400">
                   在下方直接輸入，或在筆記中打 @ai 加問題後按 Enter。
                   <br />
                   回覆會出現在這裡，不會插進你的筆記正文。
@@ -225,8 +225,8 @@ export default function AIConversationPanel({
           </div>
 
           {/* 輸入列 */}
-          <div className="mt-2 flex items-center gap-2 rounded-xl border border-navy-800/10 bg-white px-3 py-2 focus-within:border-sky-300 transition-colors">
-            <Bot className="h-3.5 w-3.5 shrink-0 text-sky-500" strokeWidth={2.2} />
+          <div className="mt-2 flex items-center gap-2 rounded-xl border border-navy-800/10 bg-white px-3 py-2 focus-within:border-sky-300 transition-colors dark:bg-slate-900/90 dark:border-slate-700 dark:focus-within:border-cyan-500/50">
+            <Bot className="h-3.5 w-3.5 shrink-0 text-sky-500 dark:text-cyan-400" strokeWidth={2.2} />
             <input
               ref={inputRef}
               value={draft}
@@ -234,7 +234,7 @@ export default function AIConversationPanel({
               onChange={(e) => onDraftChange?.(e.target.value)}
               onKeyDown={handleKeyDown}
               placeholder={disabled ? "唯讀狀態，無法提問" : "問 AI…（Enter 送出）"}
-              className="flex-1 min-w-0 bg-transparent text-[13px] text-navy-800 placeholder-navy-300 focus:outline-none disabled:cursor-not-allowed"
+              className="flex-1 min-w-0 bg-transparent text-[13px] text-navy-800 placeholder-navy-300 caret-navy-800 focus:outline-none disabled:cursor-not-allowed dark:text-white dark:placeholder-slate-400 dark:caret-cyan-400"
             />
             <button
               type="button"

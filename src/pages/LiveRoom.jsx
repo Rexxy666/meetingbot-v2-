@@ -2373,11 +2373,11 @@ export default function LiveRoom({ meeting, store, go, social, me, onAgendaChang
   }, []);
 
   const transcriptWall = (
-    <div className="flex flex-col min-h-0 h-full max-h-full bg-white border border-navy-800/8 rounded-3xl shadow-card overflow-hidden">
-      <div className="flex items-center justify-between gap-2 px-4 py-3 border-b border-navy-800/6 shrink-0">
+    <div className="flex flex-col min-h-0 h-full max-h-full bg-white border border-navy-800/8 dark:bg-[#161f33] dark:border-slate-800 rounded-3xl shadow-card overflow-hidden">
+      <div className="flex items-center justify-between gap-2 px-4 py-3 border-b border-navy-800/6 dark:border-slate-800/80 shrink-0">
         <div className="min-w-0">
-          <p className="text-sm font-bold text-navy-800">即時語音轉文字</p>
-          <p className="text-[11px] text-navy-400 truncate">
+          <p className="text-sm font-bold text-navy-800 dark:text-slate-100">即時語音轉文字</p>
+          <p className="text-[11px] text-navy-400 dark:text-slate-400 truncate">
             {sttSupported
               ? sttListening
                 ? "Web Speech 正在聽你說話…"
@@ -2391,8 +2391,8 @@ export default function LiveRoom({ meeting, store, go, social, me, onAgendaChang
           <span
             className={`text-[10px] font-bold px-2 py-0.5 rounded-full border ${
               sttListening
-                ? "text-mint-700 bg-mint-50 border-mint-100"
-                : "text-navy-500 bg-navy-800/5 border-navy-800/10"
+                ? "text-mint-700 bg-mint-50 border-mint-100 dark:text-cyan-300 dark:bg-cyan-500/15 dark:border-cyan-500/30"
+                : "text-navy-500 bg-navy-800/5 border-navy-800/10 dark:text-slate-300 dark:bg-slate-800/80 dark:border-slate-700"
             }`}
           >
             {transcript.length} 句
@@ -2402,7 +2402,7 @@ export default function LiveRoom({ meeting, store, go, social, me, onAgendaChang
             title="放大檢視逐字稿"
             aria-label="放大檢視逐字稿"
             onClick={openTranscriptModal}
-            className="inline-flex h-7 w-7 items-center justify-center rounded-lg border border-navy-800/10 bg-navy-800/[0.03] text-navy-500 hover:bg-mint-50 hover:text-mint-700 hover:border-mint-200 transition-colors"
+            className="inline-flex h-7 w-7 items-center justify-center rounded-lg border border-navy-800/10 bg-navy-800/[0.03] text-navy-500 hover:bg-mint-50 hover:text-mint-700 hover:border-mint-200 transition-colors dark:border-slate-700 dark:bg-slate-800/60 dark:text-slate-300 dark:hover:bg-cyan-500/10 dark:hover:text-cyan-300 dark:hover:border-cyan-500/40"
           >
             <Maximize2 className="h-3.5 w-3.5" strokeWidth={2.4} />
           </button>
@@ -2415,8 +2415,8 @@ export default function LiveRoom({ meeting, store, go, social, me, onAgendaChang
       >
         {transcript.length === 0 && !interimText ? (
           <div className="h-full min-h-[160px] flex flex-col items-center justify-center text-center px-4">
-            <p className="text-sm font-bold text-navy-600">對麥克風說話即可產生逐字稿</p>
-            <p className="mt-1 text-xs text-navy-400">
+            <p className="text-sm font-bold text-navy-600 dark:text-slate-200">對麥克風說話即可產生逐字稿</p>
+            <p className="mt-1 text-xs text-navy-400 dark:text-slate-400">
               使用瀏覽器內建語音辨識（zh-TW），非模擬台詞
             </p>
           </div>
@@ -2427,33 +2427,41 @@ export default function LiveRoom({ meeting, store, go, social, me, onAgendaChang
               return (
                 <div
                   key={row.id}
-                  className={`rounded-2xl border px-3 py-2 ${pal.bg} border-navy-800/5`}
+                  className={`rounded-2xl border px-3 py-2 ${pal.bg} border-navy-800/5 dark:bg-slate-800/70 dark:border-slate-700/70`}
                 >
                   <div className="flex items-center gap-2 mb-0.5">
-                    <span className="text-[10px] font-bold tabular-nums text-navy-400">
+                    <span className="text-[10px] font-bold tabular-nums text-navy-400 dark:text-slate-400">
                       [{row.time}]
                     </span>
-                    <span className={`text-[11px] font-black ${pal.text}`}>{row.speaker}</span>
+                    <span className={`text-[11px] font-black ${pal.text} dark:text-cyan-400`}>
+                      {row.speaker}
+                    </span>
                   </div>
-                  <p className="text-sm text-navy-700 leading-relaxed">{row.text}</p>
+                  <p className="text-sm text-navy-700 leading-relaxed dark:text-slate-100">
+                    {row.text}
+                  </p>
                 </div>
               );
             })}
             {interimText ? (
-              <div className="rounded-2xl border border-dashed border-mint-200 bg-mint-50/60 px-3 py-2 opacity-80">
+              <div className="rounded-2xl border border-dashed border-mint-200 bg-mint-50/60 px-3 py-2 opacity-90 dark:bg-cyan-500/10 dark:border-cyan-500/35">
                 <div className="flex items-center gap-2 mb-0.5">
-                  <span className="text-[10px] font-bold text-mint-600">辨識中…</span>
-                  <span className="text-[11px] font-black text-mint-700">{currentUserName}</span>
+                  <span className="text-[10px] font-bold text-mint-600 dark:text-cyan-400">辨識中…</span>
+                  <span className="text-[11px] font-black text-mint-700 dark:text-cyan-300">
+                    {currentUserName}
+                  </span>
                 </div>
-                <p className="text-sm text-navy-600 leading-relaxed">{interimText}</p>
+                <p className="text-sm text-navy-600 leading-relaxed dark:text-slate-100">
+                  {interimText}
+                </p>
               </div>
             ) : null}
           </>
         )}
         <div ref={transcriptEndRef} />
       </div>
-      <div className="shrink-0 px-4 py-2.5 border-t border-navy-800/6 bg-navy-800/[0.015]">
-        <p className="text-[10px] text-navy-400 text-center">
+      <div className="shrink-0 px-4 py-2.5 border-t border-navy-800/6 bg-navy-800/[0.015] dark:border-slate-800/80 dark:bg-slate-950/40">
+        <p className="text-[10px] text-navy-400 text-center dark:text-slate-400">
           結束會議後，完整逐字稿將交由 Gemini 深度結構化分析
         </p>
       </div>
@@ -2462,8 +2470,8 @@ export default function LiveRoom({ meeting, store, go, social, me, onAgendaChang
 
   const notesEditor = (
     <>
-      <div className="flex items-center justify-between gap-3 px-4 md:px-5 py-3.5 md:py-3 border-b border-navy-800/6 shrink-0">
-        <div className="flex items-center gap-2 text-sm font-bold text-navy-700 min-w-0">
+      <div className="flex items-center justify-between gap-3 px-4 md:px-5 py-3.5 md:py-3 border-b border-navy-800/6 dark:border-slate-800/80 shrink-0">
+        <div className="flex items-center gap-2 text-sm font-bold text-navy-700 dark:text-slate-100 min-w-0">
           <span className="h-6 w-6 shrink-0 rounded-full bg-mint-500 text-white text-[11px] font-bold flex items-center justify-center">
             {agendaIdx + 1}
           </span>
@@ -2517,9 +2525,9 @@ export default function LiveRoom({ meeting, store, go, social, me, onAgendaChang
 
       <div className={`min-h-0 flex-1 flex flex-col ${!canEdit ? "relative" : ""}`}>
         {!canEdit && (
-          <div className="flex items-center gap-1.5 px-4 md:px-5 py-1.5 border-b border-navy-800/8 bg-navy-800/[0.02] shrink-0">
-            <Lock className="h-3.5 w-3.5 text-navy-400" strokeWidth={2.2} />
-            <span className="text-[11px] font-semibold text-navy-400">
+          <div className="flex items-center gap-1.5 px-4 md:px-5 py-1.5 border-b border-navy-800/8 bg-navy-800/[0.02] dark:border-slate-800/80 dark:bg-slate-950/40 shrink-0">
+            <Lock className="h-3.5 w-3.5 text-navy-400 dark:text-slate-400" strokeWidth={2.2} />
+            <span className="text-[11px] font-semibold text-navy-400 dark:text-slate-400">
               唯讀狀態（尚未獲得發起人的編輯授權）
             </span>
           </div>
@@ -2528,7 +2536,7 @@ export default function LiveRoom({ meeting, store, go, social, me, onAgendaChang
         <MeetingNotesWithBottomAIPanel
           key={agendaIdx}
           className="flex-1 min-h-0"
-          editorClassName={`px-5 py-4 ${!canEdit ? "bg-navy-800/[0.02]" : ""}`}
+          editorClassName={`px-5 py-4 dark:text-slate-100 ${!canEdit ? "bg-navy-800/[0.02] dark:bg-slate-950/30" : ""}`}
           value={topicNotes[topic] || ""}
           onChange={(next) => setCurrentNote(next)}
           disabled={!canEdit}
@@ -2776,7 +2784,7 @@ export default function LiveRoom({ meeting, store, go, social, me, onAgendaChang
       )}
 
       {/* ── 手機：分頁列 ── */}
-      <div className="md:hidden shrink-0 mb-2 flex items-center gap-1 rounded-2xl border border-navy-800/8 bg-white p-1 shadow-sm">
+      <div className="md:hidden shrink-0 mb-2 flex items-center gap-1 rounded-2xl border border-navy-800/8 bg-white p-1 shadow-sm dark:border-slate-800 dark:bg-[#161f33]">
         {mobileTabs.map((tab) => {
           const active = mobileTab === tab.id;
           return (
@@ -2786,8 +2794,8 @@ export default function LiveRoom({ meeting, store, go, social, me, onAgendaChang
               onClick={() => setMobileTab(tab.id)}
               className={`flex-1 flex items-center justify-center gap-1 rounded-xl px-2 py-2 text-[11px] font-bold transition-all ${
                 active
-                  ? "bg-navy-800 text-white shadow-sm"
-                  : "text-navy-400 hover:text-navy-700"
+                  ? "bg-navy-800 text-white shadow-sm dark:bg-slate-100 dark:text-slate-900"
+                  : "text-navy-400 hover:text-navy-700 dark:text-slate-400 dark:hover:text-slate-100"
               }`}
             >
               <span aria-hidden>{tab.icon}</span>
@@ -2806,7 +2814,7 @@ export default function LiveRoom({ meeting, store, go, social, me, onAgendaChang
           <div className="flex-1 min-h-0 flex flex-col overflow-hidden">{transcriptWall}</div>
         )}
         {mobileTab === "notes" && (
-          <div className="flex-1 min-h-0 bg-white border border-navy-800/8 rounded-3xl shadow-card overflow-hidden flex flex-col">
+          <div className="flex-1 min-h-0 bg-white border border-navy-800/8 dark:bg-[#161f33] dark:border-slate-800 rounded-3xl shadow-card overflow-hidden flex flex-col">
             {notesPanel}
           </div>
         )}
@@ -2890,7 +2898,7 @@ export default function LiveRoom({ meeting, store, go, social, me, onAgendaChang
         </div>
 
         {/* 中央：議程筆記（視覺主角，吃掉剩餘寬度） */}
-        <div className="flex-1 min-w-0 min-h-0 h-full bg-white border border-navy-800/8 rounded-3xl shadow-card overflow-hidden flex flex-col">
+        <div className="flex-1 min-w-0 min-h-0 h-full bg-white border border-navy-800/8 dark:bg-[#161f33] dark:border-slate-800 rounded-3xl shadow-card overflow-hidden flex flex-col">
           {notesPanel}
         </div>
 
@@ -3049,7 +3057,7 @@ export default function LiveRoom({ meeting, store, go, social, me, onAgendaChang
                     value={transcriptSearch}
                     onChange={(e) => setTranscriptSearch(e.target.value)}
                     placeholder="搜尋關鍵字..."
-                    className="w-full rounded-xl border border-navy-800/10 bg-navy-800/[0.03] pl-8 pr-3 py-2 text-sm text-navy-800 placeholder:text-navy-400 outline-none focus:border-mint-300 focus:ring-2 focus:ring-mint-100 dark:bg-slate-900/60 dark:border-slate-700 dark:text-slate-100 dark:placeholder:text-slate-500 dark:focus:border-mint-500/40 dark:focus:ring-mint-500/10"
+                    className="w-full rounded-xl border border-navy-800/10 bg-navy-800/[0.03] pl-8 pr-3 py-2 text-sm text-navy-800 placeholder:text-navy-400 outline-none focus:border-mint-300 focus:ring-2 focus:ring-mint-100 caret-navy-800 dark:bg-slate-900/60 dark:border-slate-700 dark:text-slate-100 dark:placeholder:text-slate-400 dark:caret-cyan-400 dark:focus:border-mint-500/40 dark:focus:ring-mint-500/10"
                   />
                 </label>
                 <button

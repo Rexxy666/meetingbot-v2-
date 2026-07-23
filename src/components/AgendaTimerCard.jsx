@@ -29,26 +29,26 @@ export default function AgendaTimerCard({
 
   return (
     <div
-      className={`bg-white border border-navy-800/8 rounded-3xl p-5 shadow-card ${className}`}
+      className={`bg-white border border-navy-800/8 rounded-3xl p-5 shadow-card dark:bg-[#161f33] dark:border-slate-800 ${className}`}
     >
-      <p className="text-[11px] font-bold tracking-wide text-mint-600">
+      <p className="text-[11px] font-bold tracking-wide text-mint-600 dark:text-cyan-400">
         Time Boxing · {agendaIndex + 1}/{agendaCount}
       </p>
 
       <p
         className={`mt-2 text-4xl font-black tabular-nums leading-none tracking-tight ${
-          low ? "text-coral-500" : "text-navy-800"
+          low ? "text-coral-500" : "text-navy-800 dark:text-slate-100"
         }`}
       >
         {formatClock(seconds)}
       </p>
-      <p className="mt-1 text-xs font-semibold text-navy-400">
+      <p className="mt-1 text-xs font-semibold text-navy-400 dark:text-slate-400">
         {paused ? "已暫停" : budget != null ? `剩餘時間 · 預算 ${budget} 分` : "剩餘時間"}
       </p>
 
       <div className="mt-4 min-w-0">
-        <p className="text-xs font-semibold text-navy-400">當前議程</p>
-        <p className="mt-1 text-base font-black text-navy-800 leading-snug break-words">
+        <p className="text-xs font-semibold text-navy-400 dark:text-slate-400">當前議程</p>
+        <p className="mt-1 text-base font-black text-navy-800 leading-snug break-words dark:text-slate-100">
           {topic || "會議討論"}
         </p>
       </div>
@@ -58,14 +58,14 @@ export default function AgendaTimerCard({
           type="button"
           onClick={onNextAgenda}
           disabled={atLast}
-          className="w-full text-sm font-bold text-white bg-navy-800 rounded-xl py-2.5 hover:bg-navy-700 transition-colors disabled:opacity-40 disabled:cursor-not-allowed"
+          className="w-full text-sm font-bold text-white bg-navy-800 rounded-xl py-2.5 hover:bg-navy-700 transition-colors disabled:opacity-40 disabled:cursor-not-allowed dark:bg-slate-100 dark:text-slate-900 dark:hover:bg-white"
         >
           下一個議程 →
         </button>
         <button
           type="button"
           onClick={onTogglePause}
-          className="w-full inline-flex items-center justify-center gap-1.5 text-sm font-semibold text-navy-600 border border-navy-800/10 rounded-xl py-2.5 hover:bg-navy-800/[0.03] transition-colors"
+          className="w-full inline-flex items-center justify-center gap-1.5 text-sm font-semibold text-navy-600 border border-navy-800/10 rounded-xl py-2.5 hover:bg-navy-800/[0.03] transition-colors dark:text-slate-200 dark:border-slate-700 dark:hover:bg-slate-800/80"
         >
           {paused ? (
             <>

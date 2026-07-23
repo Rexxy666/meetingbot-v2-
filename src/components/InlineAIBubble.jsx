@@ -19,7 +19,7 @@ export default function InlineAIBubble({
       <button
         type="button"
         onClick={onToggleHide}
-        className={`w-full text-left rounded-xl border border-dashed border-slate-200 bg-slate-50/80 px-3 py-2 text-[11px] font-semibold text-slate-500 hover:bg-slate-100 transition-colors ${className}`}
+        className={`w-full text-left rounded-xl border border-dashed border-slate-200 bg-slate-50/80 px-3 py-2 text-[11px] font-semibold text-slate-500 hover:bg-slate-100 transition-colors dark:border-slate-700 dark:bg-slate-900/60 dark:text-slate-300 dark:hover:bg-slate-800 ${className}`}
       >
         <span className="inline-flex items-center gap-1.5 min-w-0">
           <ChevronDown className="h-3.5 w-3.5 shrink-0" strokeWidth={2.2} />
@@ -34,16 +34,16 @@ export default function InlineAIBubble({
 
   return (
     <div
-      className={`w-full min-w-0 rounded-xl border border-slate-200/80 bg-sky-50/60 border-l-4 border-l-sky-500 shadow-sm overflow-hidden ${className}`}
+      className={`w-full min-w-0 rounded-xl border border-slate-200/80 bg-sky-50/60 border-l-4 border-l-sky-500 shadow-sm overflow-hidden dark:border-slate-800 dark:bg-slate-900/60 dark:border-l-cyan-400 ${className}`}
     >
-      <div className="flex items-center gap-2 px-3 py-2 border-b border-sky-100/80 bg-sky-50/90">
-        <Bot className="h-3.5 w-3.5 text-sky-600 shrink-0" strokeWidth={2.2} />
-        <span className="text-[11px] font-bold text-sky-700">AI 助手</span>
+      <div className="flex items-center gap-2 px-3 py-2 border-b border-sky-100/80 bg-sky-50/90 dark:border-slate-800 dark:bg-slate-900/80">
+        <Bot className="h-3.5 w-3.5 text-sky-600 shrink-0 dark:text-cyan-400" strokeWidth={2.2} />
+        <span className="text-[11px] font-bold text-sky-700 dark:text-cyan-300">AI 助手</span>
         {status === "thinking" && (
-          <span className="text-[10px] font-semibold text-sky-600/80 animate-pulse">思考中…</span>
+          <span className="text-[10px] font-semibold text-sky-600/80 animate-pulse dark:text-cyan-400/90">思考中…</span>
         )}
         {status === "streaming" && (
-          <span className="text-[10px] font-semibold text-sky-600/80">回覆中…</span>
+          <span className="text-[10px] font-semibold text-sky-600/80 dark:text-cyan-400/90">回覆中…</span>
         )}
         {status === "error" && (
           <span className="text-[10px] font-semibold text-coral-500">回覆失敗</span>
@@ -53,7 +53,7 @@ export default function InlineAIBubble({
             type="button"
             title="隱藏回覆"
             onClick={onToggleHide}
-            className="ml-auto h-7 w-7 inline-flex items-center justify-center rounded-lg text-slate-400 hover:text-slate-600 hover:bg-white/80 transition-colors"
+            className="ml-auto h-7 w-7 inline-flex items-center justify-center rounded-lg text-slate-400 hover:text-slate-600 hover:bg-white/80 transition-colors dark:text-slate-400 dark:hover:text-slate-200 dark:hover:bg-slate-800"
           >
             <ChevronUp className="h-3.5 w-3.5" strokeWidth={2.2} />
           </button>
@@ -62,15 +62,15 @@ export default function InlineAIBubble({
 
       <div className={`px-3 ${compact ? "py-2" : "py-3"}`}>
         {status === "thinking" && !answer ? (
-          <p className="text-sm text-sky-700/80 font-medium flex items-center gap-2 leading-relaxed">
-            <span className="inline-block h-1.5 w-1.5 rounded-full bg-sky-500 animate-pulse" />
+          <p className="text-sm text-sky-700/80 font-medium flex items-center gap-2 leading-relaxed dark:text-cyan-300/90">
+            <span className="inline-block h-1.5 w-1.5 rounded-full bg-sky-500 animate-pulse dark:bg-cyan-400" />
             AI 思考中…
           </p>
         ) : (
-          <p className="text-sm text-slate-700 leading-relaxed whitespace-pre-wrap break-words">
+          <p className="text-sm text-slate-700 leading-relaxed whitespace-pre-wrap break-words dark:text-slate-200">
             {answer || (status === "error" ? "無法取得回覆，請再試一次。" : "")}
             {(status === "streaming" || status === "thinking") && answer ? (
-              <span className="inline-block w-1.5 h-4 ml-0.5 bg-sky-500 animate-pulse align-middle" />
+              <span className="inline-block w-1.5 h-4 ml-0.5 bg-sky-500 animate-pulse align-middle dark:bg-cyan-400" />
             ) : null}
           </p>
         )}
@@ -153,7 +153,7 @@ export function AskAiComposer({
             onChange={(e) => onChange?.(e.target.value)}
             onKeyDown={handleKeyDown}
             placeholder={placeholder}
-            className="min-w-0 flex-1 bg-transparent text-sm text-navy-800 placeholder-blue-400/70 focus:outline-none"
+            className="min-w-0 flex-1 bg-transparent text-sm text-navy-800 placeholder-blue-400/70 focus:outline-none caret-navy-800 dark:text-slate-100 dark:placeholder-slate-400 dark:caret-cyan-400"
           />
           <button
             type="button"

@@ -209,7 +209,7 @@ function AtAiTextBlock({
         <pre
           ref={backdropRef}
           aria-hidden
-          className="mf-notes-layer absolute inset-0 overflow-hidden text-navy-800 pointer-events-none"
+          className="mf-notes-layer absolute inset-0 overflow-hidden text-navy-800 dark:text-slate-100 pointer-events-none"
           dangerouslySetInnerHTML={{
             __html: highlightAtAiHtml(value) + (value.endsWith("\n") ? "\u200B" : ""),
           }}
@@ -234,7 +234,7 @@ function AtAiTextBlock({
         onScroll={syncScroll}
         placeholder={placeholder}
         spellCheck={false}
-        className={`mf-notes-layer relative w-full min-h-[4.5rem] resize-y bg-transparent caret-navy-800 placeholder-navy-300 focus:outline-none ${
+        className={`mf-notes-layer relative w-full min-h-[4.5rem] resize-y bg-transparent caret-navy-800 dark:caret-cyan-400 placeholder-navy-300 dark:placeholder-slate-400 focus:outline-none ${
           disabled ? "opacity-50 cursor-not-allowed" : ""
         }`}
         style={
@@ -248,7 +248,7 @@ function AtAiTextBlock({
         <div
           role="listbox"
           aria-label="快捷提及"
-          className="absolute z-30 rounded-xl border border-blue-200 bg-white shadow-xl ring-1 ring-blue-100/80 overflow-hidden fade-in"
+          className="absolute z-30 rounded-xl border border-blue-200 bg-white shadow-xl ring-1 ring-blue-100/80 overflow-hidden fade-in dark:border-slate-700 dark:bg-slate-900 dark:ring-slate-800"
           style={{ top: menuPos.top, left: menuPos.left, width: MENU_WIDTH }}
         >
           <p className="px-2.5 py-1.5 text-[10px] font-semibold text-navy-400 border-b border-navy-800/5">

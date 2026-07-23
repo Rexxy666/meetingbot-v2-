@@ -57,10 +57,10 @@ export const profileSchema = z
       .regex(/^[a-zA-Z0-9_/-]+$/)
       .optional(),
   })
+  .strip()
   .refine((d) => d.name != null || d.photoURL != null || d.avatarColor != null, {
     message: "至少提供一個要更新的欄位",
-  })
-  .strip();
+  });
 
 /** 頭像上傳（base64；無 Firebase Auth 時的後端備援） */
 export const avatarUploadSchema = z

@@ -77,6 +77,60 @@ html.dark {
   .dark .bg-navy-900 {
     background-color: #0f1a2c;
   }
+
+  /*
+   * 淺色 pastel 色塊在 dark 下仍維持亮底，但 text-navy-* 已被提亮 → 淺字打在淺底看不清。
+   * 只匹配 * -50 與 * -50/opacity，避免誤傷 bg-mint-500 等實心色。
+   */
+  .dark .bg-mint-50,
+  .dark [class*="bg-mint-50/"] {
+    background-color: rgba(34, 211, 238, 0.1);
+  }
+  .dark .bg-coral-50,
+  .dark [class*="bg-coral-50/"] {
+    background-color: rgba(251, 113, 133, 0.1);
+  }
+  .dark .bg-sky-50,
+  .dark [class*="bg-sky-50/"] {
+    background-color: rgba(56, 189, 248, 0.1);
+  }
+  .dark .bg-purple-50,
+  .dark [class*="bg-purple-50/"] {
+    background-color: rgba(167, 139, 250, 0.1);
+  }
+  .dark .bg-amber-50,
+  .dark [class*="bg-amber-50/"] {
+    background-color: rgba(251, 191, 36, 0.1);
+  }
+  .dark .bg-blue-50,
+  .dark [class*="bg-blue-50/"] {
+    background-color: rgba(59, 130, 246, 0.12);
+  }
+  .dark .bg-slate-50,
+  .dark [class*="bg-slate-50/"] {
+    background-color: rgba(148, 163, 184, 0.1);
+  }
+
+  /* Placeholder：對齊 WCAG，不低於 slate-400 */
+  .dark .placeholder-navy-300::placeholder,
+  .dark .placeholder-navy-400::placeholder,
+  .dark .placeholder-blue-400\/70::placeholder,
+  .dark [class*="placeholder-navy-"]::placeholder {
+    color: #94a3b8;
+    opacity: 1;
+  }
+
+  /* Caret：深色模式一律高亮青／白，避免 caret-navy-800 隱形 */
+  .dark input,
+  .dark textarea,
+  .dark [contenteditable="true"] {
+    caret-color: #22d3ee;
+  }
+  .dark .caret-navy-800,
+  .dark .caret-navy-700,
+  .dark .caret-navy-600 {
+    caret-color: #22d3ee;
+  }
 }
 
 /* 隱藏水平捲軸（統計橫向滾動用）*/
@@ -155,6 +209,12 @@ html.dark {
   -webkit-user-select: none;
 }
 
+.dark .mf-at-ai-token {
+  color: #67e8f9;
+  background-color: rgba(34, 211, 238, 0.18);
+  box-shadow: 0 0 0 2px rgba(34, 211, 238, 0.18);
+}
+
 /* 筆記雙層輸入：backdrop 與 textarea 共用度量 */
 .mf-notes-layer {
   margin: 0;
@@ -169,6 +229,10 @@ html.dark {
   white-space: pre-wrap;
   word-wrap: break-word;
   overflow-wrap: break-word;
+}
+
+.dark .mf-notes-layer {
+  color: #f1f5f9;
 }
 
 .pulse-ring {
@@ -188,4 +252,11 @@ textarea,
 input,
 select {
   outline: none;
+}
+
+/* 全站輸入游標預設（淺色模式仍用 navy，深色由上方 .dark 規則覆寫） */
+textarea,
+input:not([type="checkbox"]):not([type="radio"]),
+[contenteditable="true"] {
+  caret-color: #0f1b2d;
 }
