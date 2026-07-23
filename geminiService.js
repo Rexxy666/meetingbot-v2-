@@ -495,19 +495,7 @@ export async function answerLiveSilentAsk({
   const preferred = resolveGeminiModel();
   const modelsToTry = [preferred, ...FALLBACK_MODELS.filter((m) => m !== preferred)];
   const ai = new GoogleGenAI({ apiKey });
-  const prompt = `你是會議中的靜音文字助理。規則：
-1. 只輸出純文字答案，絕不要求語音播報、也不模擬口語主持。
-2. 回答精簡、可直接貼進筆記（2–6 句或條列）。
-3. 優先依據「近 5 分鐘會議逐字稿」回答；不足時明確說明假設。
-4. 使用繁體中文。
-
-會議主題：${title || "未命名"}
-當前議程：${topic || "一般討論"}
-近 5 分鐘逐字稿：
----
-${contextBlock}
----
-與會者語音問題：${q}`;
+  const prompt = buildLiveAskPrompt({ title, topic, contextBlock, q });
 
   let lastError = null;
   for (const model of modelsToTry) {
@@ -533,4 +521,113 @@ ${contextBlock}
     silent: true,
     message: `Gemini 失敗，已降級：${lastError?.message || "未知錯誤"}`,
   };
+}
+
+function buildLiveAskPrompt({ title, topic, contextBlock, q }) {
+  return `你是會議中的靜音文字助理。規則：
+1. 只輸出純文字答案，絕不要求語音播報、也不模擬口語主持。
+2. 回答精簡、可直接貼進筆記（2–6 句或條列）。
+3. 優先依據「近 5 分鐘會議逐字稿」回答；不足時明確說明假設。
+4. 使用繁體中文。
+
+會議主題：${title || "未命名"}
+當前議程：${topic || "一般討論"}
+近 5 分鐘逐字稿：
+---
+${contextBlock}
+---
+與會者語音問題：${q}`;
+}
+
+/**
+ * SSE 串流版會中問答：對 onEvent 回呼 chunk / done / error。
+ * chunk.text 為目前累積全文（方便前端直接 setState）。
+ */
+export async function streamLiveSilentAsk(
+  {
+    question = "",
+    meetingTranscript = "",
+    title = "",
+    topic = "",
+    mode = "enterprise",
+  } = {},
+  { onEvent, signal } = {}
+) {
+  const emit = (payload) => {
+    if (signal?.aborted) return;
+    onEvent?.(payload);
+  };
+
+  const q = String(question || "").trim();
+  const safeMode = mode === "student" ? "student" : "enterprise";
+  if (!q) {
+    emit({ type: "done", answer: "請先說出問題。", source: "insufficient", silent: true });
+    return;
+  }
+
+  const contextBlock = String(meetingTranscript || "").trim() || "（尚無近 5 分鐘逐字稿）";
+  const mockAnswer =
+    safeMode === "student"
+      ? `針對「${q}」：依目前討論脈絡，建議先對齊這題要交什麼、誰負責、什麼時候交。可把共識寫進筆記，避免散會後又忘記。`
+      : `針對「${q}」：建議先釐清決策目標、依賴與時程風險，再把可執行下一步寫入共編筆記，方便會後追蹤。`;
+
+  const streamMock = async (answer, source, message) => {
+    const text = String(answer || "");
+    let i = 0;
+    while (i < text.length) {
+      if (signal?.aborted) return;
+      i = Math.min(text.length, i + 3);
+      emit({ type: "chunk", text: text.slice(0, i) });
+      await new Promise((r) => setTimeout(r, 18));
+    }
+    emit({ type: "done", answer: text, source, silent: true, message });
+  };
+
+  const apiKey = (process.env.GEMINI_API_KEY || "").trim();
+  if (!apiKey) {
+    await streamMock(mockAnswer, "mock");
+    return;
+  }
+
+  const preferred = resolveGeminiModel();
+  const modelsToTry = [preferred, ...FALLBACK_MODELS.filter((m) => m !== preferred)];
+  const ai = new GoogleGenAI({ apiKey });
+  const prompt = buildLiveAskPrompt({ title, topic, contextBlock, q });
+
+  let lastError = null;
+  for (const model of modelsToTry) {
+    try {
+      const stream = await ai.models.generateContentStream({
+        model,
+        contents: prompt,
+        config: { temperature: 0.4 },
+      });
+      let accumulated = "";
+      for await (const chunk of stream) {
+        if (signal?.aborted) return;
+        const delta = extractResponseText(chunk);
+        if (!delta) continue;
+        accumulated += delta;
+        emit({ type: "chunk", text: accumulated });
+      }
+      const answer = accumulated.trim() || mockAnswer;
+      emit({
+        type: "done",
+        answer,
+        source: accumulated.trim() ? "gemini" : "mock",
+        model,
+        silent: true,
+      });
+      return;
+    } catch (err) {
+      lastError = err;
+      console.error(`[geminiService/liveAskStream] model=${model}`, err?.message || err);
+    }
+  }
+
+  await streamMock(
+    mockAnswer,
+    "mock",
+    `Gemini 失敗，已降級：${lastError?.message || "未知錯誤"}`
+  );
 }

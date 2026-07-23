@@ -5,15 +5,11 @@ import {
   ChevronUp,
   ClipboardCheck,
   CornerDownLeft,
-  Trash2,
+  RefreshCw,
 } from "lucide-react";
 
 /* ════════════════════════════════════════════════════════════════════════
    底部可收折 AI 對話面板（方案 B）
-
-   設計前提：筆記正文只留純文字，所有 AI 問答一律進到這個面板。
-   對話資料仍存在 notes doc 的 ai block 裡，所以會跟著 topicNotes 同步給全員，
-   本元件只負責「呈現」，不自行保存狀態。
    ════════════════════════════════════════════════════════════════════════ */
 
 function TypingDots() {
@@ -30,26 +26,34 @@ function TypingDots() {
   );
 }
 
-/** 單組問答：藍色使用者氣泡 + 白底 AI 氣泡 */
-function ChatExchange({ item, onCopyToNotes, onDelete, copiedId }) {
+function friendlyAiError(raw) {
+  const msg = String(raw || "").trim();
+  if (!msg) return "暫時無法取得回覆，請再試一次。";
+  if (/404|not found/i.test(msg)) return "AI 服務連線異常，請重試（已可自動改用備用通道）。";
+  if (/請先輸入|請先說出|空/.test(msg)) return msg;
+  if (/請求失敗\s*\(\d+\)/.test(msg)) return "AI 暫時無法回應，請稍後重試。";
+  return msg;
+}
+
+/** 單組問答：藍色使用者氣泡 + 白底 AI 氣泡（作為會議紀錄保留，不提供刪除） */
+function ChatExchange({ item, onCopyToNotes, onRetry, copiedId }) {
   const streaming = item.status === "thinking" || item.status === "streaming";
   const canCopy = item.status === "done" && String(item.answer || "").trim();
+  const canRetry = item.status === "error" && typeof onRetry === "function";
 
   return (
     <div className="space-y-1.5">
-      {/* 使用者提問（靠右藍色氣泡） */}
       <div className="flex justify-end">
-        <div className="max-w-[85%] rounded-2xl rounded-br-md bg-blue-50 border border-blue-100 px-3 py-2">
+        <div className="max-w-[85%] min-w-0 rounded-2xl rounded-br-md bg-blue-50 border border-blue-100 px-3 py-2">
           <p className="text-[13px] text-navy-800 leading-relaxed whitespace-pre-wrap break-words">
             {item.question}
           </p>
         </div>
       </div>
 
-      {/* AI 回答（靠左白底氣泡） */}
       <div className="flex justify-start">
-        <div className="max-w-[92%] min-w-0 rounded-2xl rounded-bl-md bg-white border border-navy-800/8 shadow-sm px-3 py-2">
-          <div className="flex items-center gap-1.5 mb-1">
+        <div className="max-w-[92%] min-w-[min(100%,280px)] rounded-2xl rounded-bl-md bg-white border border-navy-800/8 shadow-sm px-3 py-3">
+          <div className="flex items-center gap-1.5 mb-1.5">
             <span className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-[10px] font-bold bg-sky-100 text-sky-700">
               <Bot className="h-3 w-3" strokeWidth={2.4} />
               AI
@@ -57,11 +61,25 @@ function ChatExchange({ item, onCopyToNotes, onDelete, copiedId }) {
             {item.status === "thinking" && (
               <span className="text-[10px] font-semibold text-sky-600/80">思考中</span>
             )}
+            {item.status === "streaming" && (
+              <span className="text-[10px] font-semibold text-sky-600/80">回覆中</span>
+            )}
             {item.status === "error" && (
               <span className="text-[10px] font-semibold text-coral-500">回覆失敗</span>
             )}
 
             <div className="ml-auto flex items-center gap-0.5">
+              {canRetry && (
+                <button
+                  type="button"
+                  onClick={() => onRetry(item)}
+                  title="重試"
+                  className="inline-flex items-center gap-1 h-6 px-2 rounded-lg text-[10px] font-bold text-coral-600 hover:bg-coral-50 transition-colors"
+                >
+                  <RefreshCw className="h-3 w-3" strokeWidth={2.4} />
+                  重試
+                </button>
+              )}
               {canCopy && typeof onCopyToNotes === "function" && (
                 <button
                   type="button"
@@ -77,24 +95,20 @@ function ChatExchange({ item, onCopyToNotes, onDelete, copiedId }) {
                   {copiedId === item.id ? "已插入" : "複製到筆記"}
                 </button>
               )}
-              {typeof onDelete === "function" && (
-                <button
-                  type="button"
-                  onClick={() => onDelete(item.id)}
-                  title="刪除這則對話"
-                  className="h-6 w-6 inline-flex items-center justify-center rounded-lg text-navy-300 hover:text-coral-500 hover:bg-coral-50 transition-colors"
-                >
-                  <Trash2 className="h-3 w-3" strokeWidth={2.4} />
-                </button>
-              )}
             </div>
           </div>
 
           {item.status === "thinking" && !item.answer ? (
             <TypingDots />
           ) : (
-            <p className="text-[13px] text-navy-700 leading-relaxed whitespace-pre-wrap break-words">
-              {item.answer || (item.status === "error" ? "無法取得回覆，請再試一次。" : "")}
+            <p
+              className={`text-[13px] leading-relaxed whitespace-pre-wrap break-words ${
+                item.status === "error" ? "text-coral-600" : "text-navy-700"
+              }`}
+            >
+              {item.status === "error"
+                ? friendlyAiError(item.answer)
+                : item.answer || ""}
               {streaming && item.answer ? (
                 <span className="inline-block w-1 h-3.5 ml-0.5 bg-sky-500 animate-pulse align-middle" />
               ) : null}
@@ -114,7 +128,7 @@ export default function AIConversationPanel({
   onDraftChange,
   onSubmit,
   onCopyToNotes,
-  onDelete,
+  onRetry,
   copiedId = null,
   inputRef,
   disabled = false,
@@ -142,7 +156,8 @@ export default function AIConversationPanel({
     if (e.nativeEvent?.isComposing || e.keyCode === 229) return;
     e.preventDefault();
     const q = String(draft || "").trim();
-    if (q && !disabled) onSubmit?.(q);
+    if (!q || disabled) return;
+    onSubmit?.(q);
   };
 
   const count = items.length;
@@ -202,7 +217,7 @@ export default function AIConversationPanel({
                   key={item.id}
                   item={item}
                   onCopyToNotes={onCopyToNotes}
-                  onDelete={onDelete}
+                  onRetry={onRetry}
                   copiedId={copiedId}
                 />
               ))

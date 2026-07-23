@@ -1,8 +1,9 @@
 import { initializeApp } from "firebase/app";
 import { getAuth, GoogleAuthProvider } from "firebase/auth";
+import { getStorage } from "firebase/storage";
 
 /**
- * 前端 Firebase（Hosting + Google Auth）
+ * 前端 Firebase（Hosting + Google Auth + Storage）
  * 在 Firebase Console → 專案設定 → 您的應用程式 複製設定，
  * 填入 Vite 環境變數（.env / Firebase Hosting 建置環境）。
  */
@@ -21,6 +22,7 @@ export const isFirebaseConfigured = Boolean(
 
 let app = null;
 let auth = null;
+let storage = null;
 
 export function getFirebaseApp() {
   if (!isFirebaseConfigured) return null;
@@ -32,6 +34,12 @@ export function getFirebaseAuth() {
   if (!isFirebaseConfigured) return null;
   if (!auth) auth = getAuth(getFirebaseApp());
   return auth;
+}
+
+export function getFirebaseStorage() {
+  if (!isFirebaseConfigured || !firebaseConfig.storageBucket) return null;
+  if (!storage) storage = getStorage(getFirebaseApp());
+  return storage;
 }
 
 export function getGoogleProvider() {

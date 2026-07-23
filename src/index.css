@@ -87,6 +87,35 @@ html.dark {
   -ms-overflow-style: none;
   scrollbar-width: none;
 }
+
+/* 逐字稿等長列表：微光窄邊捲軸 */
+.mf-thin-scrollbar {
+  scrollbar-width: thin;
+  scrollbar-color: rgb(51 65 85 / 0.55) transparent;
+}
+.mf-thin-scrollbar::-webkit-scrollbar {
+  width: 6px;
+  height: 6px;
+}
+.mf-thin-scrollbar::-webkit-scrollbar-track {
+  background: transparent;
+}
+.mf-thin-scrollbar::-webkit-scrollbar-thumb {
+  background: rgb(51 65 85 / 0.45);
+  border-radius: 999px;
+}
+.mf-thin-scrollbar::-webkit-scrollbar-thumb:hover {
+  background: rgb(51 65 85 / 0.7);
+}
+.dark .mf-thin-scrollbar {
+  scrollbar-color: rgb(100 116 139 / 0.65) transparent;
+}
+.dark .mf-thin-scrollbar::-webkit-scrollbar-thumb {
+  background: rgb(100 116 139 / 0.55);
+}
+.dark .mf-thin-scrollbar::-webkit-scrollbar-thumb:hover {
+  background: rgb(148 163 184 / 0.7);
+}
 ::selection {
   background: #a7efe1;
 }

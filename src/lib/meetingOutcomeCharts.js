@@ -1,38 +1,9 @@
 /**
  * 會後「結果導向」圖表資料層
- * ── 優先由真實 meeting / review / actions 推算
- * ── 資料不足時回退精簡 Mock，方便預覽圖表結構
+ * ── 100% 由真實 meeting / review / actions 推算
+ * ── 資料不足時回傳「誠實的空結構」（total 0、空陣列），
+ *    絕不捏造示意數字（不再有 40% / 圓餅 mock）。
  */
-
-export const MOCK_OUTCOME_CHARTS = {
-  painResolution: {
-    total: 5,
-    resolved: 2,
-    tracking: 2,
-    unresolved: 1,
-    items: [
-      { pain: "轉換率偏低", status: "resolved" },
-      { pain: "庫存周轉慢", status: "resolved" },
-      { pain: "折扣策略不清", status: "tracking" },
-      { pain: "客服回覆慢", status: "tracking" },
-      { pain: "跨部門對齊不足", status: "unresolved" },
-    ],
-  },
-  decisionPriority: [
-    { id: "d1", text: "採納 15 項主力商品", effort: 3, impact: 8 },
-    { id: "d2", text: "執行滿額折扣券", effort: 2, impact: 7 },
-    { id: "d3", text: "重建客服 SOP", effort: 7, impact: 6 },
-    { id: "d4", text: "調整官網文案", effort: 2, impact: 3 },
-    { id: "d5", text: "導入新倉儲系統", effort: 9, impact: 8 },
-    { id: "d6", text: "每週數據複盤", effort: 4, impact: 5 },
-  ],
-  actionCategories: [
-    { name: "行銷", count: 4 },
-    { name: "商品", count: 3 },
-    { name: "營運", count: 2 },
-    { name: "產品", count: 1 },
-  ],
-};
 
 const CATEGORY_RULES = [
   { name: "行銷", re: /(行銷|折扣|優惠|廣告|社群|轉換|促銷|券|曝光|投放|文案|活動)/ },
@@ -201,12 +172,13 @@ function hasOpenAssignee(actions, painText) {
 export function buildPainResolution({ pains = [], decisions = [], actions = [] } = {}) {
   const list = (pains || []).map(String).map((p) => p.trim()).filter(Boolean);
   if (!list.length) {
-    const mock = MOCK_OUTCOME_CHARTS.painResolution;
+    // 沒有痛點就是沒有——回傳空結構，讓 UI 顯示誠實的空狀態，不捏造數字
     return {
-      ...summarizePainCounts(mock.items),
-      items: mock.items,
-      fromMock: true,
-      insight: "尚無會前痛點資料；以下為示意結構，補上痛點後即可自動計算解決率。",
+      ...summarizePainCounts([]),
+      items: [],
+      fromMock: false,
+      empty: true,
+      insight: "本場沒有登錄痛點資料，無法計算解決率。",
     };
   }
 
@@ -246,14 +218,25 @@ function summarizePainCounts(items) {
 /** 決議優先級：供清單卡片使用（P0 / P1 / P2） */
 export function buildDecisionPriority(decisions = []) {
   const list = (decisions || []).map(String).map((t) => t.trim()).filter(Boolean);
-  const source = list.length
-    ? list.map((text, i) => ({
-        id: `dec-${i}`,
-        text,
-        effort: clamp(scoreEffort(text), 1, 10),
-        impact: clamp(scoreImpact(text), 1, 10),
-      }))
-    : MOCK_OUTCOME_CHARTS.decisionPriority;
+  // 沒有決議 → 回傳空結構，UI 顯示「本場尚未產出決議」，不套示意排序
+  if (!list.length) {
+    return {
+      points: [],
+      groups: { P0: [], P1: [], P2: [] },
+      fromMock: false,
+      empty: true,
+      insight: "本場尚未產出決議，無法排定優先級。",
+      priorityMeta: PRIORITY_META,
+      quadrantMeta: QUADRANT_META,
+    };
+  }
+
+  const source = list.map((text, i) => ({
+    id: `dec-${i}`,
+    text,
+    effort: clamp(scoreEffort(text), 1, 10),
+    impact: clamp(scoreImpact(text), 1, 10),
+  }));
 
   const points = source.map((p) => {
     const effort = clamp(Number(p.effort) || 5, 1, 10);
@@ -281,19 +264,16 @@ export function buildDecisionPriority(decisions = []) {
     P2: points.filter((p) => p.priority === "P2"),
   };
 
-  const fromMock = !list.length;
   const p0 = groups.P0.length;
   const p1 = groups.P1.length;
-  let insight = fromMock
-    ? "尚無決議文字；以下為示意排序。補上記錄後，系統會依語意推估效益與執行難度並分級。"
-    : `共 ${points.length} 項決議：建議優先執行 ${p0} 項 P0 任務，以最低成本快速取得成果${
-        p1 ? `；另有 ${p1} 項 P1 核心專案需排程投入` : ""
-      }。`;
+  const insight = `共 ${points.length} 項決議：建議優先執行 ${p0} 項 P0 任務，以最低成本快速取得成果${
+    p1 ? `；另有 ${p1} 項 P1 核心專案需排程投入` : ""
+  }。`;
 
   return {
     points,
     groups,
-    fromMock,
+    fromMock: false,
     insight,
     priorityMeta: PRIORITY_META,
     quadrantMeta: QUADRANT_META,
@@ -304,19 +284,13 @@ export function buildDecisionPriority(decisions = []) {
 export function buildActionCategories(actions = []) {
   const list = Array.isArray(actions) ? actions : [];
   if (!list.length) {
-    const mock = MOCK_OUTCOME_CHARTS.actionCategories;
-    const total = mock.reduce((n, c) => n + c.count, 0);
-    const segments = mock.map((c) => ({
-      name: c.name,
-      count: c.count,
-      value: total ? Math.round((c.count / total) * 100) : 0,
-      color: CATEGORY_COLORS[c.name] || CATEGORY_COLORS["其他"],
-    }));
+    // 沒有待辦 → 空結構，不捏造行銷/商品圓餅
     return {
-      segments,
-      total,
-      fromMock: true,
-      insight: "尚無待辦；示意顯示各領域重心。新增 Action Items 後會自動歸類。",
+      segments: [],
+      total: 0,
+      fromMock: false,
+      empty: true,
+      insight: "本場尚無待辦事項，無法統計領域分布。",
     };
   }
 

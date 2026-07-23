@@ -21,6 +21,8 @@ function publicUser(u) {
     id: u.id,
     email: u.email,
     name: u.name,
+    photoURL: u.photoURL || "",
+    avatarColor: u.avatarColor || "bg-mint-500",
     createdAt: u.createdAt,
     authProvider: u.authProvider || "password",
   };
@@ -53,7 +55,8 @@ export async function upsertGoogleUser(storeOps, { firebaseUid, email, name }) {
     const patched = await storeOps.saveUser({
       ...user,
       email: normalized,
-      name: displayName || user.name,
+      // 保留使用者自訂顯示名稱，避免每次 Google 登入被覆蓋
+      name: String(user.name || "").trim() || displayName,
       firebaseUid,
       authProvider: user.authProvider === "password" ? "password+google" : "google",
     });
@@ -143,13 +146,13 @@ export function createFirestoreAuth() {
     async loginWithGoogle(payload) {
       return upsertGoogleUser(ops, payload);
     },
-    async updateProfile(id, { name }) {
+    async updateProfile(id, patch = {}) {
       const user = await getDocById(id);
       if (!user) throw Object.assign(new Error("找不到使用者"), { status: 404 });
-      if (name?.trim()) {
-        user.name = name.trim();
-        await saveUser(user);
-      }
+      if (patch.name?.trim()) user.name = patch.name.trim();
+      if (patch.photoURL != null) user.photoURL = String(patch.photoURL).trim();
+      if (patch.avatarColor?.trim()) user.avatarColor = patch.avatarColor.trim();
+      await saveUser(user);
       return publicUser(user);
     },
     async getById(id) {

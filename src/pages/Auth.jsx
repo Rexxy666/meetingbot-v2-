@@ -91,7 +91,7 @@ export default function Auth({ auth }) {
       <div className="w-full max-w-md">
         <div className="text-center mb-8">
           <h1 className="text-3xl font-black text-mint-600 tracking-tight">MeetFlow</h1>
-          <p className="mt-2 text-sm text-navy-400">登入後只會看到屬於你的會議與待辦</p>
+          <p className="mt-2 text-sm text-navy-400">告別無效會議，掌握屬於你的高效工作流。</p>
         </div>
 
         <div className="bg-white border border-navy-800/8 rounded-3xl shadow-card p-6">

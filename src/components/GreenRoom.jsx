@@ -10,6 +10,7 @@ import {
   Video,
 } from "lucide-react";
 import Avatar from "./Avatar.jsx";
+import { resolveAvatarColor } from "../lib/avatarColors.js";
 import {
   defaultMediaSettings,
   describeJoinState,
@@ -37,9 +38,9 @@ function formatWhen(ts) {
 }
 
 /**
- * 第二階段：大廳準備頁（Green Room）
+ * 大廳準備頁（Green Room / Pre-join Lobby）
  * - 預設麥／鏡頭關閉（友善 UX）
- * - 進入會議時 stash 串流 + mediaSettings，供 MeetingRoom 繼承
+ * - 進入會議時 stash 串流 + mediaSettings，供 LiveMeeting 繼承
  */
 export default function GreenRoom({ meeting, me, onCancel, onJoin }) {
   const [mediaSettings, setMediaSettings] = useState(() => defaultMediaSettings());
@@ -51,6 +52,8 @@ export default function GreenRoom({ meeting, me, onCancel, onJoin }) {
   const joiningRef = useRef(false);
 
   const title = meeting?.title || "會議";
+  const displayName = String(me?.name || "").trim() || "我";
+  const avatarColor = resolveAvatarColor(me?.avatarColor);
   const onlineHint = useMemo(() => {
     const n =
       (meeting?.attendees || []).length ||
@@ -300,9 +303,9 @@ export default function GreenRoom({ meeting, me, onCancel, onJoin }) {
         </button>
 
         <div className="grid grid-cols-1 lg:grid-cols-[1.4fr_1fr] gap-5 lg:gap-8 items-start">
-          {/* 左側：預覽 */}
+          {/* 左側：16:9 視訊預覽 */}
           <section className={`${CARD} overflow-hidden`}>
-            <div className="relative aspect-[16/10] md:aspect-[16/9] bg-navy-900">
+            <div className="relative aspect-[16/10] md:aspect-[16/9] bg-slate-900">
               {!mediaSettings.isVideoOff ? (
                 <video
                   ref={videoRef}
@@ -312,11 +315,12 @@ export default function GreenRoom({ meeting, me, onCancel, onJoin }) {
                   autoPlay
                 />
               ) : (
-                <div className="absolute inset-0 flex flex-col items-center justify-center gap-3 bg-gradient-to-br from-navy-800 to-navy-900">
+                <div className="absolute inset-0 flex flex-col items-center justify-center gap-3 bg-gradient-to-br from-slate-800 to-slate-900">
                   <Avatar
-                    name={me?.name || "我"}
+                    name={displayName}
+                    src={me?.photoURL}
                     size="h-24 w-24 text-2xl"
-                    color="bg-coral-500"
+                    color={avatarColor}
                     ring={false}
                   />
                   <p className="text-sm text-white/70 font-medium">鏡頭已關閉</p>
@@ -331,7 +335,7 @@ export default function GreenRoom({ meeting, me, onCancel, onJoin }) {
                   onClick={() => patchSettings({ isMuted: !mediaSettings.isMuted })}
                   className={`h-12 w-12 rounded-full flex items-center justify-center border transition-all active:scale-95 ${
                     mediaSettings.isMuted
-                      ? "bg-coral-500 border-coral-400 text-white"
+                      ? "bg-coral-500 border-coral-400 text-white hover:bg-coral-400"
                       : "bg-white/95 border-white text-navy-800"
                   }`}
                 >
@@ -348,7 +352,7 @@ export default function GreenRoom({ meeting, me, onCancel, onJoin }) {
                   onClick={() => patchSettings({ isVideoOff: !mediaSettings.isVideoOff })}
                   className={`h-12 w-12 rounded-full flex items-center justify-center border transition-all active:scale-95 ${
                     mediaSettings.isVideoOff
-                      ? "bg-coral-500 border-coral-400 text-white"
+                      ? "bg-coral-500 border-coral-400 text-white hover:bg-coral-400"
                       : "bg-white/95 border-white text-navy-800"
                   }`}
                 >
@@ -372,7 +376,7 @@ export default function GreenRoom({ meeting, me, onCancel, onJoin }) {
           {/* 右側：會議資訊 + 裝置 */}
           <aside className={`${CARD} p-5 md:p-6 space-y-5`}>
             <div>
-              <p className="text-[11px] font-bold uppercase tracking-wider text-coral-500">大廳準備</p>
+              <p className="text-[11px] font-bold tracking-wider text-coral-500">大廳準備</p>
               <h1 className="mt-1 text-xl md:text-2xl font-black text-navy-800 tracking-tight">{title}</h1>
               <div className="mt-3 flex flex-wrap gap-2 text-xs text-navy-500">
                 <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full bg-gray-50 border border-gray-100">
@@ -450,11 +454,11 @@ export default function GreenRoom({ meeting, me, onCancel, onJoin }) {
               type="button"
               disabled={busyJoin}
               onClick={handleJoin}
-              className="w-full h-12 rounded-xl bg-coral-500 hover:bg-coral-400 text-white font-bold shadow-sm transition-colors disabled:opacity-60 active:scale-[0.99]"
+              className="w-full h-12 rounded-xl bg-coral-500 hover:bg-coral-400 text-white text-sm font-bold shadow-sm transition-colors disabled:opacity-60 active:scale-[0.99]"
             >
               {busyJoin ? "進入中…" : "立即加入"}
             </button>
-            <p className="text-center text-xs font-medium text-navy-400">{joinLabel}</p>
+            <p className="text-center text-xs font-medium text-navy-400 -mt-2">{joinLabel}</p>
           </aside>
         </div>
       </div>

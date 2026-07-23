@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useLayoutEffect, useRef, useState } from "react";
 import { Bot } from "lucide-react";
-import { askLiveSilentAi } from "../lib/api.js";
-import { buildSilentAskPayload, typewriterStream } from "../lib/silentAiAsk.js";
+import { askLiveSilentAiStream } from "../lib/api.js";
+import { buildSilentAskPayload } from "../lib/silentAiAsk.js";
 import {
   createId,
   extractAtAiLine,
@@ -346,6 +346,11 @@ export default function MeetingNotesEditor({
   const runAi = useCallback(
     async (aiId, question) => {
       if (!aiContext) return;
+      const q = String(question || "").trim();
+      if (!q) {
+        updateAiBlock(aiId, { status: "error", answer: "請先輸入或說出問題" });
+        return;
+      }
       abortMap.current.get(aiId)?.abort?.();
       const ac = new AbortController();
       abortMap.current.set(aiId, ac);
@@ -353,7 +358,7 @@ export default function MeetingNotesEditor({
       updateAiBlock(aiId, { status: "thinking", answer: "" }, { stream: true });
 
       const packed = buildSilentAskPayload({
-        question,
+        question: q,
         transcriptRows: aiContext.transcriptRows || [],
         title: aiContext.title || "",
         topic: aiContext.topic || "",
@@ -361,18 +366,7 @@ export default function MeetingNotesEditor({
       });
 
       try {
-        let answerText = "";
-        try {
-          const res = await askLiveSilentAi(packed);
-          answerText = String(res?.answer || "").trim();
-        } catch {
-          answerText = `（離線示意）針對「${question}」：建議先對齊目標、依賴與下一步行動。`;
-        }
-        if (!answerText) answerText = "AI 未回傳內容，請稍後再試。";
-
-        updateAiBlock(aiId, { status: "streaming", answer: "" }, { stream: true });
-        await typewriterStream(answerText, {
-          cps: 42,
+        const { answer } = await askLiveSilentAiStream(packed, {
           signal: ac.signal,
           onChunk: (partial) => {
             updateAiBlock(
@@ -381,11 +375,10 @@ export default function MeetingNotesEditor({
               { stream: syncOnStream }
             );
           },
-          onDone: (full) => {
-            updateAiBlock(aiId, { status: "done", answer: full });
-            abortMap.current.delete(aiId);
-          },
         });
+        const full = String(answer || "").trim() || "AI 未回傳內容，請稍後再試。";
+        updateAiBlock(aiId, { status: "done", answer: full });
+        abortMap.current.delete(aiId);
       } catch (e) {
         if (ac.signal.aborted) return;
         updateAiBlock(aiId, {
@@ -495,7 +488,7 @@ export default function MeetingNotesEditor({
       {blocks.map((block, i) => {
         if (block.type === "ai") {
           return (
-            <div key={block.id} className="space-y-1.5">
+            <div key={block.id} className="space-y-1.5 min-w-0 w-full">
               <AtAiPromptRow question={block.question} />
               <InlineAIBubble
                 question={block.question}
@@ -505,14 +498,6 @@ export default function MeetingNotesEditor({
                 onToggleHide={() =>
                   updateAiBlock(block.id, { hidden: !block.hidden })
                 }
-                onDelete={() => {
-                  abortMap.current.get(block.id)?.abort?.();
-                  const current = parseNotesDoc(valueRef.current);
-                  commit({
-                    v: 1,
-                    blocks: current.blocks.filter((b) => b.id !== block.id),
-                  });
-                }}
               />
             </div>
           );

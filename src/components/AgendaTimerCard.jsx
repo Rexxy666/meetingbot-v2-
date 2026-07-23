@@ -14,6 +14,7 @@ export default function AgendaTimerCard({
   topic = "",
   agendaCount = 1,
   agendaIndex = 0,
+  budgetMinutes = null,
   paused = false,
   onTogglePause,
   onNextAgenda,
@@ -21,6 +22,10 @@ export default function AgendaTimerCard({
 }) {
   const low = seconds <= 60;
   const atLast = agendaIndex >= Math.max(0, agendaCount - 1);
+  const budget =
+    budgetMinutes != null && Number.isFinite(Number(budgetMinutes))
+      ? Math.max(1, Math.round(Number(budgetMinutes)))
+      : null;
 
   return (
     <div
@@ -38,7 +43,7 @@ export default function AgendaTimerCard({
         {formatClock(seconds)}
       </p>
       <p className="mt-1 text-xs font-semibold text-navy-400">
-        {paused ? "已暫停" : "剩餘時間"}
+        {paused ? "已暫停" : budget != null ? `剩餘時間 · 預算 ${budget} 分` : "剩餘時間"}
       </p>
 
       <div className="mt-4 min-w-0">

@@ -104,8 +104,7 @@ export function useAuth() {
     setToken(null);
   }, []);
 
-  const updateProfile = useCallback(async (patch) => {
-    const name = patch?.name;
+  const updateProfile = useCallback(async (patch = {}) => {
     // 樂觀更新 UI
     setUser((prev) => {
       if (!prev) return prev;
@@ -114,19 +113,33 @@ export function useAuth() {
       if (t) setSession({ token: t, user: next });
       return next;
     });
-    // 同步到後端（失敗不擋 UI，下次 fetchMe 會校正）
-    if (name) {
-      try {
-        const { user: me } = await api.updateProfile({ name });
-        setUser(me);
-        const t = getToken();
-        if (t) setSession({ token: t, user: me });
-        return me;
-      } catch {
-        return getStoredUser();
+
+    // 若有 Firebase Auth session，同步 displayName / photoURL
+    try {
+      const { getFirebaseAuth, isFirebaseConfigured } = await import("./firebase.js");
+      if (isFirebaseConfigured) {
+        const fbUser = getFirebaseAuth()?.currentUser;
+        if (fbUser && (patch.name != null || patch.photoURL != null)) {
+          const { updateProfile: fbUpdateProfile } = await import("firebase/auth");
+          const fbPatch = {};
+          if (patch.name != null) fbPatch.displayName = String(patch.name).trim();
+          if (patch.photoURL != null) fbPatch.photoURL = String(patch.photoURL).trim();
+          await fbUpdateProfile(fbUser, fbPatch);
+        }
       }
+    } catch {
+      /* Firebase Auth 同步失敗不阻斷後端更新 */
     }
-    return getStoredUser();
+
+    try {
+      const { user: me } = await api.updateProfile(patch);
+      setUser(me);
+      const t = getToken();
+      if (t) setSession({ token: t, user: me });
+      return me;
+    } catch (e) {
+      throw e;
+    }
   }, []);
 
   const resetLocalCache = useCallback(() => {

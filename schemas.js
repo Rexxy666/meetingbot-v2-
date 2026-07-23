@@ -46,7 +46,27 @@ export const loginSchema = z
 
 export const profileSchema = z
   .object({
-    name: nonEmpty(80),
+    name: z.string().trim().min(1).max(80).optional(),
+    photoURL: z
+      .union([z.string().trim().url().max(2000), z.literal("")])
+      .optional(),
+    avatarColor: z
+      .string()
+      .trim()
+      .max(40)
+      .regex(/^[a-zA-Z0-9_/-]+$/)
+      .optional(),
+  })
+  .refine((d) => d.name != null || d.photoURL != null || d.avatarColor != null, {
+    message: "至少提供一個要更新的欄位",
+  })
+  .strip();
+
+/** 頭像上傳（base64；無 Firebase Auth 時的後端備援） */
+export const avatarUploadSchema = z
+  .object({
+    contentType: z.enum(["image/jpeg", "image/png", "image/webp", "image/gif"]),
+    dataBase64: z.string().min(32).max(3_500_000),
   })
   .strip();
 
@@ -90,8 +110,10 @@ export const createMeetingSchema = z
     participants: z.array(z.union([z.string().max(80), attendeeSchema])).max(100).optional(),
     pains: z.array(z.string().max(500)).max(50).optional(),
     goals: z.array(z.string().max(500)).max(50).optional(),
+    agendaMinutes: z.array(z.coerce.number().int().min(1).max(480)).max(50).optional(),
     links: z.array(z.string().max(2000)).max(50).optional(),
     durationMin: z.coerce.number().int().min(1).max(480).optional(),
+    scheduledAt: z.coerce.number().finite().optional().nullable(),
     inviteRoster: z.array(attendeeSchema).max(100).optional(),
     rbac: z.record(z.unknown()).optional(),
     isEditRestricted: z.boolean().optional(),
@@ -122,7 +144,7 @@ export const meetingPatchInputSchema = z
     title: optStr(200),
     notes: z.string().max(500_000).optional(),
     topicNotes: z.record(z.string().max(200_000)).optional(),
-    transcript: z.array(transcriptRowSchema).max(500).optional(),
+    transcript: z.array(transcriptRowSchema).max(10_000).optional(),
     transcriptText: z.string().max(1_000_000).optional(),
     aiSource: z.enum(["transcript", "notes"]).optional(),
     review: z.unknown().optional(),
@@ -132,8 +154,10 @@ export const meetingPatchInputSchema = z
     participants: z.array(z.string().max(80)).max(100).optional(),
     pains: z.array(z.string().max(500)).max(50).optional(),
     goals: z.array(z.string().max(500)).max(50).optional(),
+    agendaMinutes: z.array(z.coerce.number().int().min(1).max(480)).max(50).optional(),
     links: z.array(z.string().max(2000)).max(50).optional(),
     durationMin: z.coerce.number().int().min(1).max(480).optional(),
+    scheduledAt: z.coerce.number().finite().optional().nullable(),
     status: z.enum(["ready", "live", "done"]).optional(),
     meetingStatus: z.enum(["in_progress", "ended"]).optional(),
     startedAt: z.number().finite().optional().nullable(),

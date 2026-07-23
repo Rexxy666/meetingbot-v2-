@@ -116,10 +116,22 @@ export function fetchMe() {
   return request("/api/auth/me");
 }
 
-export function updateProfile({ name }) {
+export function updateProfile(patch = {}) {
+  const body = {};
+  if (patch.name != null) body.name = String(patch.name).trim();
+  if (patch.photoURL != null) body.photoURL = String(patch.photoURL).trim();
+  if (patch.avatarColor != null) body.avatarColor = String(patch.avatarColor).trim();
   return request("/api/auth/profile", {
     method: "PATCH",
-    body: JSON.stringify({ name: String(name || "").trim() }),
+    body: JSON.stringify(body),
+  });
+}
+
+export function uploadAvatar({ contentType, dataBase64 }) {
+  return request("/api/auth/avatar", {
+    method: "POST",
+    timeoutMs: 60000,
+    body: JSON.stringify({ contentType, dataBase64 }),
   });
 }
 
@@ -241,15 +253,170 @@ export function summarizeNotes({ notes, participants, title, mode }) {
  * 會中靜音問答：語音轉文字問題 + 近 5 分鐘逐字稿 → 純文字答案（無 TTS）。
  */
 export function askLiveSilentAi({ question, meetingTranscript, title, topic, mode }) {
+  const q = String(question || "").trim();
+  if (!q) {
+    return Promise.reject(new ApiError("請先輸入或說出問題", 400));
+  }
   return request("/api/ai/ask", {
     method: "POST",
     timeoutMs: 60000,
     body: JSON.stringify({
-      question: String(question || ""),
+      question: q,
       meetingTranscript: String(meetingTranscript || ""),
       title: String(title || ""),
       topic: String(topic || ""),
       mode: mode === "student" ? "student" : "enterprise",
     }),
   });
+}
+
+/**
+ * 會中靜音問答（SSE）：onChunk 收到累積全文，完成回傳 { answer, source }。
+ * stream 端點 404／不可用時自動降級為 /api/ai/ask。
+ */
+export async function askLiveSilentAiStream(
+  { question, meetingTranscript, title, topic, mode },
+  { onChunk, signal } = {}
+) {
+  const q = String(question || "").trim();
+  if (!q) {
+    throw new ApiError("請先輸入或說出問題", 400);
+  }
+
+  const payload = {
+    question: q,
+    meetingTranscript,
+    title,
+    topic,
+    mode,
+  };
+
+  const runOneshootFallback = async () => {
+    const fallback = await askLiveSilentAi(payload);
+    const answer = String(fallback?.answer || "").trim();
+    if (!answer) throw new ApiError("AI 未回傳內容，請稍後再試", 502);
+    // 輕量打字機，維持串流 UX
+    let i = 0;
+    while (i < answer.length) {
+      if (signal?.aborted) throw new DOMException("Aborted", "AbortError");
+      i = Math.min(answer.length, i + 4);
+      onChunk?.(answer.slice(0, i));
+      await new Promise((r) => setTimeout(r, 16));
+    }
+    return {
+      answer,
+      source: fallback?.source || "mock",
+      silent: true,
+      ...(fallback || {}),
+    };
+  };
+
+  const base = resolveApiBase();
+  const headers = { "Content-Type": "application/json", Accept: "text/event-stream" };
+  const token = getToken();
+  if (token) headers.Authorization = `Bearer ${token}`;
+
+  let res;
+  try {
+    res = await fetch(`${base}/api/ai/ask/stream`, {
+      method: "POST",
+      headers,
+      mode: "cors",
+      signal,
+      body: JSON.stringify({
+        question: q,
+        meetingTranscript: String(meetingTranscript || ""),
+        title: String(title || ""),
+        topic: String(topic || ""),
+        mode: mode === "student" ? "student" : "enterprise",
+      }),
+    });
+  } catch (e) {
+    if (e?.name === "AbortError") throw e;
+    // 網路錯誤 → 降級一次性 API
+    return runOneshootFallback();
+  }
+
+  if (res.status === 401) {
+    clearSession();
+  }
+
+  // 舊後端尚未部署 stream 路由、或代理不支援 → 降級
+  if (res.status === 404 || res.status === 405 || res.status === 501 || res.status === 502) {
+    return runOneshootFallback();
+  }
+
+  if (!res.ok) {
+    const body = await res.json().catch(() => ({}));
+    const msg =
+      body.error ||
+      (res.status >= 500
+        ? "AI 服務暫時忙碌，請稍後重試"
+        : `無法完成提問（${res.status}）`);
+    throw new ApiError(msg, res.status);
+  }
+  if (!res.body) {
+    return runOneshootFallback();
+  }
+
+  const reader = res.body.getReader();
+  const decoder = new TextDecoder();
+  let buffer = "";
+  let answer = "";
+  let source = "gemini";
+  let donePayload = null;
+
+  const handleData = (raw) => {
+    const line = String(raw || "").trim();
+    if (!line || line === "[DONE]") return;
+    let data;
+    try {
+      data = JSON.parse(line);
+    } catch {
+      return;
+    }
+    if (data.type === "chunk") {
+      answer = String(data.text || "");
+      onChunk?.(answer);
+      return;
+    }
+    if (data.type === "done") {
+      answer = String(data.answer || answer || "").trim();
+      source = data.source || source;
+      donePayload = data;
+      onChunk?.(answer);
+      return;
+    }
+    if (data.type === "error") {
+      throw new ApiError(data.error || "AI 問答失敗", 500);
+    }
+  };
+
+  try {
+    while (true) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      buffer += decoder.decode(value, { stream: true });
+      const parts = buffer.split("\n");
+      buffer = parts.pop() || "";
+      for (const part of parts) {
+        const trimmed = part.trim();
+        if (!trimmed.startsWith("data:")) continue;
+        handleData(trimmed.slice(5).trim());
+      }
+    }
+    if (buffer.trim().startsWith("data:")) {
+      handleData(buffer.trim().slice(5).trim());
+    }
+  } catch (e) {
+    if (e?.name === "AbortError") throw e;
+    if (e instanceof ApiError) throw e;
+    return runOneshootFallback();
+  }
+
+  if (!answer && !donePayload) {
+    return runOneshootFallback();
+  }
+
+  return { answer, source, silent: true, ...(donePayload || {}) };
 }

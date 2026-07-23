@@ -19,6 +19,8 @@ const userSchema = new mongoose.Schema(
     id: { type: String, required: true, unique: true, index: true },
     email: { type: String, required: true, unique: true, lowercase: true, trim: true },
     name: { type: String, required: true, trim: true },
+    photoURL: { type: String, default: "" },
+    avatarColor: { type: String, default: "bg-mint-500" },
     passwordHash: { type: String, default: "" },
     firebaseUid: { type: String, default: "", index: true },
     authProvider: { type: String, default: "password" },
@@ -39,6 +41,8 @@ function publicUser(u) {
     id: u.id,
     email: u.email,
     name: u.name,
+    photoURL: u.photoURL || "",
+    avatarColor: u.avatarColor || "bg-mint-500",
     createdAt: u.createdAt,
     authProvider: u.authProvider || "password",
   };
@@ -155,11 +159,13 @@ function createJsonAuth() {
       return { user: publicUser(user), token: signToken(user) };
     },
 
-    async updateProfile(id, { name }) {
+    async updateProfile(id, patch = {}) {
       const users = await load();
       const user = users.find((u) => u.id === id);
       if (!user) throw Object.assign(new Error("找不到使用者"), { status: 404 });
-      if (name?.trim()) user.name = name.trim();
+      if (patch.name?.trim()) user.name = patch.name.trim();
+      if (patch.photoURL != null) user.photoURL = String(patch.photoURL).trim();
+      if (patch.avatarColor?.trim()) user.avatarColor = patch.avatarColor.trim();
       await save();
       return publicUser(user);
     },
@@ -282,17 +288,17 @@ function createMongoAuth() {
       if (!(await bcrypt.compare(password || "", user.passwordHash))) {
         throw Object.assign(new Error("密碼錯誤"), { status: 401 });
       }
-      const plain = { id: user.id, email: user.email, name: user.name, createdAt: user.createdAt };
+      const plain = publicUser(user);
       return { user: plain, token: signToken(plain) };
     },
 
-    async updateProfile(id, { name }) {
+    async updateProfile(id, patch = {}) {
       const user = await UserModel.findOne({ id });
       if (!user) throw Object.assign(new Error("找不到使用者"), { status: 404 });
-      if (name?.trim()) {
-        user.name = name.trim();
-        await user.save();
-      }
+      if (patch.name?.trim()) user.name = patch.name.trim();
+      if (patch.photoURL != null) user.photoURL = String(patch.photoURL).trim();
+      if (patch.avatarColor?.trim()) user.avatarColor = patch.avatarColor.trim();
+      await user.save();
       return publicUser(user);
     },
     async getById(id) {

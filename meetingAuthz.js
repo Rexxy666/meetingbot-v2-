@@ -108,9 +108,8 @@ const OWNER_ONLY_KEYS = new Set([
   "scenarioLabel",
   "scenarioEmoji",
   "extra",
-  "durationMin",
+  "scheduledAt",
   "pains",
-  "goals",
   "links",
   "ownerName",
 ]);
@@ -126,6 +125,10 @@ const EDIT_KEYS = new Set([
   "transcriptText",
   "aiSource",
   "startedAt",
+  /** 議程名稱／各項時間預算／會議總時長：Host 或授權編輯者可改 */
+  "goals",
+  "agendaMinutes",
+  "durationMin",
 ]);
 
 /** 名冊同步：任一會議成員可更新（加入狀態） */

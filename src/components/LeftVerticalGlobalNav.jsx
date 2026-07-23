@@ -9,6 +9,7 @@ import {
   Users,
 } from "lucide-react";
 import Avatar from "./Avatar.jsx";
+import LogoutConfirmModal from "./LogoutConfirmModal.jsx";
 import { getMode } from "../config/meetingConfig.js";
 
 const tabs = [
@@ -40,7 +41,7 @@ function BrandMark() {
   );
 }
 
-function UserMenu({ user, mode, onOpenProfile, onOpenSettings, onLogout, onOpenChange }) {
+function UserMenu({ user, mode, onOpenProfile, onOpenSettings, onRequestLogout, onOpenChange }) {
   const [open, setOpen] = useState(false);
   const modeInfo = getMode(mode);
 
@@ -57,7 +58,13 @@ function UserMenu({ user, mode, onOpenProfile, onOpenSettings, onLogout, onOpenC
         aria-label="帳號選單"
         className="rounded-full p-0.5 transition-opacity hover:opacity-80 active:scale-95 ring-2 ring-transparent hover:ring-mint-200"
       >
-        <Avatar name={user?.name || "U"} size="h-9 w-9" ring={false} />
+        <Avatar
+          name={user?.name || "U"}
+          src={user?.photoURL}
+          color={user?.avatarColor || "bg-mint-500"}
+          size="h-9 w-9"
+          ring={false}
+        />
       </button>
 
       {open && (
@@ -96,7 +103,7 @@ function UserMenu({ user, mode, onOpenProfile, onOpenSettings, onLogout, onOpenC
               type="button"
               onClick={() => {
                 setMenuOpen(false);
-                onLogout();
+                onRequestLogout?.();
               }}
               className="w-full flex items-center gap-2.5 text-sm font-medium text-coral-500 px-3 py-2.5 rounded-xl hover:bg-coral-50 transition-colors"
             >
@@ -135,6 +142,7 @@ export default function LeftVerticalGlobalNav({
 }) {
   const [revealed, setRevealed] = useState(false);
   const [menuOpen, setMenuOpen] = useState(false);
+  const [logoutOpen, setLogoutOpen] = useState(false);
   const hideTimerRef = useRef(null);
   const badge = { todo: todoCount, friends: friendsCount };
 
@@ -150,14 +158,22 @@ export default function LeftVerticalGlobalNav({
     setRevealed(true);
   }, [clearHideTimer]);
 
+  // 帳號選單或登出確認開啟時維持抽屜展開
+  useEffect(() => {
+    if (menuOpen || logoutOpen) {
+      clearHideTimer();
+      setRevealed(true);
+    }
+  }, [menuOpen, logoutOpen, clearHideTimer]);
+
   const scheduleHide = useCallback(() => {
-    if (menuOpen || !immersive) return;
+    if (menuOpen || logoutOpen || !immersive) return;
     clearHideTimer();
     hideTimerRef.current = setTimeout(() => {
       setRevealed(false);
       hideTimerRef.current = null;
     }, 200);
-  }, [clearHideTimer, menuOpen, immersive]);
+  }, [clearHideTimer, menuOpen, logoutOpen, immersive]);
 
   useEffect(() => () => clearHideTimer(), [clearHideTimer]);
 
@@ -167,16 +183,13 @@ export default function LeftVerticalGlobalNav({
     setRevealed(false);
   }, [immersive, clearHideTimer]);
 
-  // 帳號選單開啟時維持抽屜展開
-  useEffect(() => {
-    if (menuOpen) {
-      clearHideTimer();
-      setRevealed(true);
-    }
-  }, [menuOpen, clearHideTimer]);
-
   // 常駐模式永遠展開；沉浸模式才吃 revealed
   const visible = !immersive || revealed;
+
+  const handleConfirmLogout = useCallback(() => {
+    setLogoutOpen(false);
+    onLogout?.();
+  }, [onLogout]);
 
   return (
     <>
@@ -245,11 +258,17 @@ export default function LeftVerticalGlobalNav({
             mode={mode}
             onOpenProfile={onOpenProfile}
             onOpenSettings={onOpenSettings}
-            onLogout={onLogout}
+            onRequestLogout={() => setLogoutOpen(true)}
             onOpenChange={setMenuOpen}
           />
         </div>
       </aside>
+
+      <LogoutConfirmModal
+        open={logoutOpen}
+        onCancel={() => setLogoutOpen(false)}
+        onConfirm={handleConfirmLogout}
+      />
     </>
   );
 }

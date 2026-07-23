@@ -11,6 +11,7 @@ import {
   summarizeMeetingNotes,
   generatePrivateInsights,
   answerLiveSilentAsk,
+  streamLiveSilentAsk,
 } from "./geminiService.js";
 import {
   agendaSelectSchema,
@@ -26,6 +27,7 @@ import {
   meetingReportSchema,
   notesUpdateSchema,
   parseOrThrow,
+  avatarUploadSchema,
   profileSchema,
   registerSchema,
   respondSchema,
@@ -125,7 +127,7 @@ async function main() {
       credentials: false,
     })
   );
-  app.use(express.json({ limit: "1mb" }));
+  app.use(express.json({ limit: "4mb" }));
 
   // 統一處理 Zod／授權錯誤
   const sendErr = (res, e, fallback = "請求失敗") => {
@@ -203,6 +205,56 @@ async function main() {
     } catch (e) {
       console.error("[api/ai/ask]", e?.message || e);
       sendErr(res, e, "AI 問答失敗");
+    }
+  });
+
+  /** 會中靜音問答（SSE 串流）：邊生成邊推送 chunk */
+  app.post("/api/ai/ask/stream", requireAuth, async (req, res) => {
+    let closed = false;
+    const onClose = () => {
+      closed = true;
+    };
+    req.on("close", onClose);
+
+    try {
+      const body = parseOrThrow(liveAskSchema, req.body, "會中 AI 問答");
+      res.status(200);
+      res.setHeader("Content-Type", "text/event-stream; charset=utf-8");
+      res.setHeader("Cache-Control", "no-cache, no-transform");
+      res.setHeader("Connection", "keep-alive");
+      res.setHeader("X-Accel-Buffering", "no");
+      if (typeof res.flushHeaders === "function") res.flushHeaders();
+
+      const writeEvent = (payload) => {
+        if (closed || res.writableEnded) return;
+        res.write(`data: ${JSON.stringify(payload)}\n\n`);
+      };
+
+      await streamLiveSilentAsk(body, {
+        signal: { get aborted() { return closed; } },
+        onEvent: writeEvent,
+      });
+
+      if (!closed && !res.writableEnded) res.end();
+    } catch (e) {
+      console.error("[api/ai/ask/stream]", e?.message || e);
+      if (!res.headersSent) {
+        sendErr(res, e, "AI 問答失敗");
+        return;
+      }
+      try {
+        res.write(
+          `data: ${JSON.stringify({
+            type: "error",
+            error: e?.message || "AI 問答失敗",
+          })}\n\n`
+        );
+      } catch {
+        /* ignore */
+      }
+      if (!res.writableEnded) res.end();
+    } finally {
+      req.off?.("close", onClose);
     }
   });
 
@@ -307,6 +359,23 @@ async function main() {
     }
   });
 
+  /** 頭像上傳備援（無 Firebase Auth 時由 Admin 寫入 Storage） */
+  app.post("/api/auth/avatar", requireAuth, async (req, res) => {
+    try {
+      const body = parseOrThrow(avatarUploadSchema, req.body, "頭像");
+      const buffer = Buffer.from(body.dataBase64, "base64");
+      if (!buffer.length || buffer.length > 2.5 * 1024 * 1024) {
+        return res.status(400).json({ error: "圖片過大或無效（上限約 2MB）" });
+      }
+      const { uploadAvatarBuffer } = await import("./firebaseAdmin.js");
+      const photoURL = await uploadAvatarBuffer(req.user.id, buffer, body.contentType);
+      const user = await authStore.updateProfile(req.user.id, { photoURL });
+      res.json({ user, photoURL });
+    } catch (e) {
+      sendErr(res, e, "上傳頭像失敗");
+    }
+  });
+
   // ── Meetings（僅本人資料）─────────────────────────────────────────────────
 
   app.get("/api/meetings", requireAuth, async (req, res) => {
@@ -351,8 +420,24 @@ async function main() {
         participants,
         pains: data.pains || [],
         goals: data.goals || [],
+        agendaMinutes: (() => {
+          const goals = Array.isArray(data.goals) ? data.goals : [];
+          const mins = Array.isArray(data.agendaMinutes) ? data.agendaMinutes : [];
+          const fallback = Math.max(
+            1,
+            Math.round((Number(data.durationMin) || 30) / Math.max(1, goals.length || 1))
+          );
+          return goals.map((_, i) => {
+            const n = Number(mins[i]);
+            return Number.isFinite(n) && n >= 1 ? Math.min(480, Math.round(n)) : fallback;
+          });
+        })(),
         links: data.links || [],
         durationMin: data.durationMin || 30,
+        scheduledAt:
+          data.scheduledAt != null && Number.isFinite(Number(data.scheduledAt))
+            ? Number(data.scheduledAt)
+            : null,
         notes: "",
         topicNotes: {},
         status: "ready",

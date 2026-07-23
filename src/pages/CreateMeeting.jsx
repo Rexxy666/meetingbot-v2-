@@ -8,9 +8,13 @@ import {
   Lock,
   Sparkles,
   Clock,
+  CalendarDays,
+  Pencil,
   Plus,
   Trash2,
+  X,
 } from "lucide-react";
+import { createPortal } from "react-dom";
 import { getMode, getScenario, getScenariosForTab } from "../config/meetingConfig.js";
 import FriendAttendeePicker from "../components/FriendAttendeePicker.jsx";
 import CreatedInviteModal from "../components/CreatedInviteModal.jsx";
@@ -18,7 +22,186 @@ import MeetingRbacPanel from "../components/MeetingRbacPanel.jsx";
 import { useTheme } from "../lib/theme.js";
 
 const inputCls =
-  "w-full rounded-2xl border border-navy-800/10 bg-white px-4 py-3.5 text-sm text-navy-800 placeholder-navy-300 shadow-[0_1px_2px_rgba(15,27,45,0.04)] focus:border-mint-400 focus:shadow-glow transition-all";
+  "w-full rounded-2xl border border-navy-800/10 bg-white px-4 py-3.5 text-sm text-navy-800 placeholder-navy-300 shadow-[0_1px_2px_rgba(15,27,45,0.04)] focus:border-cyan-500 focus:ring-1 focus:ring-cyan-500 focus:shadow-none transition-all dark:border-slate-700 dark:bg-slate-800/80 dark:text-slate-100 dark:placeholder:text-slate-500 dark:focus:border-cyan-400 dark:focus:ring-cyan-400";
+
+const SCHEDULE_DURATION_OPTIONS = [15, 30, 45, 60];
+
+function pad2(n) {
+  return String(n).padStart(2, "0");
+}
+
+function todayISODate() {
+  const d = new Date();
+  return `${d.getFullYear()}-${pad2(d.getMonth() + 1)}-${pad2(d.getDate())}`;
+}
+
+/** 下一個整點或半小時（例：13:20 → 13:30；13:30 → 14:00） */
+function nextHalfHourTime() {
+  const d = new Date();
+  const mins = d.getMinutes();
+  if (mins < 30) {
+    d.setMinutes(30, 0, 0);
+  } else {
+    d.setHours(d.getHours() + 1, 0, 0, 0);
+  }
+  return `${pad2(d.getHours())}:${pad2(d.getMinutes())}`;
+}
+
+function combineScheduleTs(dateStr, timeStr) {
+  const raw = `${String(dateStr || "").trim()}T${String(timeStr || "").trim()}`;
+  const ts = new Date(raw).getTime();
+  return Number.isFinite(ts) ? ts : null;
+}
+
+/** 摘要：07/23 11:30 PM (45 分鐘) */
+function formatScheduleSummary(dateStr, timeStr, durationMin) {
+  const ts = combineScheduleTs(dateStr, timeStr);
+  if (!ts) return `${durationMin || 30} 分鐘`;
+  try {
+    const d = new Date(ts);
+    const md = d.toLocaleDateString("en-US", { month: "2-digit", day: "2-digit" });
+    const tm = d.toLocaleTimeString("en-US", {
+      hour: "numeric",
+      minute: "2-digit",
+      hour12: true,
+    });
+    return `${md} ${tm} (${durationMin || 30} 分鐘)`;
+  } catch {
+    return `${durationMin || 30} 分鐘`;
+  }
+}
+
+/** 預定時間設定彈窗 */
+function SchedulePickerModal({
+  open,
+  date,
+  time,
+  durationMin,
+  onChangeDate,
+  onChangeTime,
+  onChangeDuration,
+  onCancel,
+  onConfirm,
+}) {
+  useEffect(() => {
+    if (!open) return undefined;
+    const prev = document.body.style.overflow;
+    document.body.style.overflow = "hidden";
+    const onKey = (e) => {
+      if (e.key === "Escape") onCancel?.();
+    };
+    window.addEventListener("keydown", onKey);
+    return () => {
+      document.body.style.overflow = prev;
+      window.removeEventListener("keydown", onKey);
+    };
+  }, [open, onCancel]);
+
+  if (!open) return null;
+
+  return createPortal(
+    <div className="fixed inset-0 z-[80] flex items-end sm:items-center justify-center p-4">
+      <button
+        type="button"
+        aria-label="關閉"
+        className="absolute inset-0 bg-slate-950/50 backdrop-blur-sm"
+        onClick={onCancel}
+      />
+      <div
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby="schedule-picker-title"
+        className="relative w-full max-w-md rounded-2xl border border-white/40 bg-white/95 p-5 shadow-[0_20px_60px_rgba(15,27,45,0.18)] backdrop-blur-xl fade-in dark:border-slate-600/40 dark:bg-slate-900/90"
+        onClick={(e) => e.stopPropagation()}
+      >
+        <button
+          type="button"
+          aria-label="關閉"
+          onClick={onCancel}
+          className="absolute right-3 top-3 p-1.5 rounded-lg text-navy-300 hover:text-navy-600 hover:bg-gray-50 dark:text-slate-400 dark:hover:text-white dark:hover:bg-slate-800"
+        >
+          <X className="h-4 w-4" strokeWidth={2} />
+        </button>
+
+        <h3
+          id="schedule-picker-title"
+          className="text-lg font-bold text-navy-800 pr-8 flex items-center gap-2 dark:text-white"
+        >
+          <CalendarDays className="h-5 w-5 text-coral-500" strokeWidth={2} />
+          設定預定會議時間
+        </h3>
+
+        <div className="mt-4 space-y-3">
+          <label className="block">
+            <span className="mb-1.5 flex items-center gap-1 text-xs font-semibold text-navy-600 dark:text-slate-300">
+              <CalendarDays className="h-3.5 w-3.5" strokeWidth={2} />
+              日期
+            </span>
+            <input
+              type="date"
+              value={date}
+              min={todayISODate()}
+              onChange={(e) => onChangeDate?.(e.target.value)}
+              className={inputCls + " py-2.5"}
+            />
+          </label>
+          <label className="block">
+            <span className="mb-1.5 flex items-center gap-1 text-xs font-semibold text-navy-600 dark:text-slate-300">
+              <Clock className="h-3.5 w-3.5" strokeWidth={2} />
+              開始時間
+            </span>
+            <input
+              type="time"
+              value={time}
+              onChange={(e) => onChangeTime?.(e.target.value)}
+              className={inputCls + " py-2.5"}
+            />
+          </label>
+          <label className="block">
+            <span className="mb-1.5 block text-xs font-semibold text-navy-600 dark:text-slate-300">
+              預計時長
+            </span>
+            <div className="relative">
+              <select
+                value={durationMin}
+                onChange={(e) => onChangeDuration?.(Number(e.target.value))}
+                className={inputCls + " appearance-none pr-10 py-2.5"}
+              >
+                {SCHEDULE_DURATION_OPTIONS.map((min) => (
+                  <option key={min} value={min}>
+                    {min} 分鐘
+                  </option>
+                ))}
+              </select>
+              <Clock
+                className="h-4 w-4 text-navy-400 absolute right-4 top-1/2 -translate-y-1/2 pointer-events-none"
+                strokeWidth={2}
+              />
+            </div>
+          </label>
+        </div>
+
+        <div className="mt-5 flex gap-2">
+          <button
+            type="button"
+            onClick={onCancel}
+            className="flex-1 font-medium py-2.5 rounded-xl text-navy-500 border border-gray-100 hover:bg-gray-50 transition-colors dark:text-slate-300 dark:border-slate-600 dark:hover:bg-slate-800"
+          >
+            取消
+          </button>
+          <button
+            type="button"
+            onClick={onConfirm}
+            className="flex-1 font-semibold py-2.5 rounded-xl bg-coral-500 text-white hover:bg-coral-400 shadow-sm transition-colors"
+          >
+            確認時間
+          </button>
+        </div>
+      </div>
+    </div>,
+    document.body
+  );
+}
 
 /* ── 可逐條新增的清單輸入 ─────────────────────────────────────────────── */
 function ListInput({ items, setItems, placeholder, ordered, accent = "mint" }) {
@@ -396,6 +579,37 @@ export default function CreateMeeting({ store, go, modeId = "enterprise", friend
   const [created, setCreated] = useState(null);
   const [scenarioTab, setScenarioTab] = useState("daily");
   const [gateTasks, setGateTasks] = useState(() => seedGateTasksFromScenario(mode.scenarios[0]));
+  const [scheduleMode, setScheduleMode] = useState("immediate"); // immediate | scheduled
+  const [scheduleDate, setScheduleDate] = useState(() => todayISODate());
+  const [scheduleTime, setScheduleTime] = useState(() => nextHalfHourTime());
+  const [scheduleModalOpen, setScheduleModalOpen] = useState(false);
+  const [draftDate, setDraftDate] = useState(() => todayISODate());
+  const [draftTime, setDraftTime] = useState(() => nextHalfHourTime());
+  const [draftDuration, setDraftDuration] = useState(30);
+
+  const openScheduleModal = () => {
+    setDraftDate(scheduleDate || todayISODate());
+    setDraftTime(scheduleTime || nextHalfHourTime());
+    setDraftDuration(
+      SCHEDULE_DURATION_OPTIONS.includes(values.durationMin) ? values.durationMin : 30
+    );
+    setScheduleModalOpen(true);
+  };
+
+  const cancelScheduleModal = () => {
+    setScheduleModalOpen(false);
+    setScheduleMode("immediate");
+  };
+
+  const confirmScheduleModal = () => {
+    setScheduleDate(draftDate || todayISODate());
+    setScheduleTime(draftTime || nextHalfHourTime());
+    setField("durationMin", draftDuration || 30);
+    setScheduleMode("scheduled");
+    setScheduleModalOpen(false);
+  };
+
+  const scheduleSummary = formatScheduleSummary(scheduleDate, scheduleTime, values.durationMin);
 
   // ── RBAC 權限狀態（發起人預設為 host）──
   const [currentRole, setCurrentRole] = useState("host");
@@ -521,6 +735,16 @@ export default function CreateMeeting({ store, go, modeId = "enterprise", friend
         if (merged[f.key] !== undefined) extra[f.key] = merged[f.key];
       }
 
+      const isScheduled = scheduleMode === "scheduled";
+      let scheduledAt = null;
+      if (isScheduled) {
+        scheduledAt = combineScheduleTs(scheduleDate, scheduleTime);
+        if (!scheduledAt) {
+          setCreateError("請設定有效的預約日期與時間");
+          return;
+        }
+      }
+
       const meeting = await store.createMeeting({
         title: merged.title,
         scenario: scenario.id,
@@ -533,6 +757,7 @@ export default function CreateMeeting({ store, go, modeId = "enterprise", friend
         goals: Array.isArray(goals) ? goals : [],
         links,
         durationMin: merged.durationMin,
+        scheduledAt,
       });
 
       // 將邀請名冊與 RBAC 寫回會議，供 LiveRoom / MeetingSummary 共用
@@ -540,6 +765,7 @@ export default function CreateMeeting({ store, go, modeId = "enterprise", friend
         attendees,
         participants: attendees.map((a) => a.name),
         inviteRoster,
+        scheduledAt,
         rbac: {
           isEditRestricted,
           isHostAssignmentEnabled,
@@ -548,12 +774,20 @@ export default function CreateMeeting({ store, go, modeId = "enterprise", friend
         isHostAssignmentEnabled,
       });
 
-      setCreated({
-        id: meeting.id,
-        code: meeting.code,
-        title: String(merged.title || "").trim(),
-        attendeeCount: attendees.length,
-      });
+      if (isScheduled) {
+        setCreated({
+          id: meeting.id,
+          code: meeting.code,
+          title: String(merged.title || "").trim(),
+          attendeeCount: attendees.length,
+          variant: "scheduled",
+          scheduledAt,
+          durationMin: merged.durationMin,
+        });
+      } else {
+        // 立即開始：建立後直進大廳準備頁
+        go("prejoin", meeting.id);
+      }
     } catch (e) {
       setCreateError(e.message || "建立會議失敗，請確認後端已啟動");
     } finally {
@@ -568,7 +802,12 @@ export default function CreateMeeting({ store, go, modeId = "enterprise", friend
           meetingCode={created.code}
           title={created.title}
           attendeeCount={created.attendeeCount || 0}
-          onEnterLive={() => go("prejoin", created.id)}
+          variant={created.variant || "invite"}
+          scheduledAt={created.scheduledAt}
+          durationMin={created.durationMin}
+          onEnterLive={
+            created.variant === "scheduled" ? undefined : () => go("prejoin", created.id)
+          }
           onDone={() => go("dashboard", created.id)}
         />
       )}
@@ -714,20 +953,75 @@ export default function CreateMeeting({ store, go, modeId = "enterprise", friend
               </Field>
             )}
 
-            <Field label="會議時間設定" required>
-              <div className="relative">
-                <select
-                  value={values.durationMin}
-                  onChange={(e) => setField("durationMin", Number(e.target.value))}
-                  className={inputCls + " appearance-none pr-10"}
+            <Field label="時間與排程" required>
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+                <button
+                  type="button"
+                  onClick={() => setScheduleMode("immediate")}
+                  className={`text-left rounded-2xl border px-3.5 py-3 transition-all active:scale-[0.99] ${
+                    scheduleMode === "immediate"
+                      ? "border-mint-400 bg-mint-50/70 ring-2 ring-mint-200 dark:border-cyan-400 dark:bg-cyan-950/30 dark:ring-cyan-500/20"
+                      : "border-navy-800/10 bg-white hover:border-mint-200 dark:border-slate-700 dark:bg-slate-800/60 dark:hover:border-slate-500"
+                  }`}
                 >
-                  {scenario.duration.options.map((min) => (
-                    <option key={min} value={min}>{min} 分鐘</option>
-                  ))}
-                </select>
-                <Clock className="h-4 w-4 text-navy-400 absolute right-4 top-1/2 -translate-y-1/2 pointer-events-none" strokeWidth={2} />
+                  <p className="text-sm font-bold text-navy-800 dark:text-white">檢核完成後立即開始</p>
+                  <p className="mt-0.5 text-[11px] text-navy-400 dark:text-slate-400">建立後進入大廳準備</p>
+                </button>
+                <button
+                  type="button"
+                  onClick={openScheduleModal}
+                  className={`text-left rounded-2xl border px-3.5 py-3 transition-all active:scale-[0.99] ${
+                    scheduleMode === "scheduled"
+                      ? "border-mint-400 bg-mint-50/70 ring-2 ring-mint-200 dark:border-cyan-400 dark:bg-cyan-950/30 dark:ring-cyan-500/20"
+                      : "border-navy-800/10 bg-white hover:border-mint-200 dark:border-slate-700 dark:bg-slate-800/60 dark:hover:border-slate-500"
+                  }`}
+                >
+                  <p className="text-sm font-bold text-navy-800 dark:text-white">預定排程會議</p>
+                  {scheduleMode === "scheduled" ? (
+                    <span className="mt-1.5 inline-flex items-center gap-1.5 max-w-full text-[11px] font-semibold text-mint-700 bg-mint-50 border border-mint-100 rounded-full px-2 py-0.5 dark:text-cyan-300 dark:bg-cyan-950/40 dark:border-cyan-500/25">
+                      <span className="truncate">已排程：{scheduleSummary}</span>
+                      <span className="inline-flex items-center gap-0.5 shrink-0 text-navy-500 dark:text-slate-300">
+                        <Pencil className="h-3 w-3" strokeWidth={2.2} />
+                        修改
+                      </span>
+                    </span>
+                  ) : (
+                    <p className="mt-0.5 text-[11px] text-navy-400 dark:text-slate-400">
+                      點擊設定日期與時間
+                    </p>
+                  )}
+                </button>
               </div>
+
+              {scheduleMode === "immediate" ? (
+                <div className="mt-3 relative">
+                  <select
+                    value={values.durationMin}
+                    onChange={(e) => setField("durationMin", Number(e.target.value))}
+                    className={inputCls + " appearance-none pr-10"}
+                  >
+                    {scenario.duration.options.map((min) => (
+                      <option key={min} value={min}>
+                        {min} 分鐘
+                      </option>
+                    ))}
+                  </select>
+                  <Clock className="h-4 w-4 text-navy-400 absolute right-4 top-1/2 -translate-y-1/2 pointer-events-none" strokeWidth={2} />
+                </div>
+              ) : null}
             </Field>
+
+            <SchedulePickerModal
+              open={scheduleModalOpen}
+              date={draftDate}
+              time={draftTime}
+              durationMin={draftDuration}
+              onChangeDate={setDraftDate}
+              onChangeTime={setDraftTime}
+              onChangeDuration={setDraftDuration}
+              onCancel={cancelScheduleModal}
+              onConfirm={confirmScheduleModal}
+            />
 
             <div className="flex gap-2 pt-1">
               <button onClick={() => setStep(1)} className="flex items-center justify-center gap-1 px-4 py-3.5 rounded-2xl text-navy-500 font-semibold border border-navy-800/10 hover:bg-navy-800/[0.03] transition-colors">
@@ -850,17 +1144,27 @@ export default function CreateMeeting({ store, go, modeId = "enterprise", friend
                 className={`flex-1 flex items-center justify-center gap-2 font-black py-3.5 rounded-2xl transition-all active:scale-[0.98]
                   ${
                     canUnlock && !creating
-                      ? "text-white bg-gradient-to-r from-mint-400 via-mint-500 to-mint-500 shadow-[0_8px_24px_rgba(20,184,166,0.35)] hover:shadow-[0_10px_28px_rgba(20,184,166,0.45)]"
+                      ? scheduleMode === "scheduled"
+                        ? "text-white bg-coral-500 hover:bg-coral-400 shadow-sm"
+                        : "text-white bg-gradient-to-r from-mint-400 via-mint-500 to-mint-500 shadow-[0_8px_24px_rgba(20,184,166,0.35)] hover:shadow-[0_10px_28px_rgba(20,184,166,0.45)]"
                       : "bg-navy-800/5 text-navy-300 cursor-not-allowed"
                   }`}
               >
                 {creating ? (
-                  "建立中…"
+                  scheduleMode === "scheduled" ? "排程中…" : "建立中…"
                 ) : canUnlock ? (
-                  <>
-                    <Sparkles className="h-4 w-4" strokeWidth={2.4} />
-                    正式發起會議
-                  </>
+                  scheduleMode === "scheduled" ? (
+                    <>
+                      <CalendarDays className="h-4 w-4" strokeWidth={2.4} />
+                      完成預約排程
+                    </>
+                  ) : (
+                    <>
+                      <Sparkles className="h-4 w-4" strokeWidth={2.4} />
+                      進入大廳準備
+                      <ChevronRight className="h-4 w-4" strokeWidth={2.6} />
+                    </>
+                  )
                 ) : (
                   <>
                     <Lock className="h-4 w-4" strokeWidth={2.4} />

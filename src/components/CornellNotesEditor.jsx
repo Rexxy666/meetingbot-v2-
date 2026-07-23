@@ -78,10 +78,10 @@ export default function CornellNotesEditor({
         </span>
       </div>
 
-      <div className="grid grid-cols-1 md:grid-cols-[minmax(170px,0.34fr)_1fr] divide-y md:divide-y-0 md:divide-x divide-violet-200/60 dark:divide-violet-400/15">
+      <div className="grid grid-cols-1 gap-0 divide-y divide-violet-200/60 dark:divide-violet-400/15 lg:grid-cols-[minmax(280px,0.4fr)_1fr] lg:divide-y-0 lg:divide-x">
         <div
           ref={cueWrap}
-          className="p-4 bg-white/50 dark:bg-white/[0.02]"
+          className="p-4 bg-white/50 dark:bg-white/[0.02] min-w-0"
           onKeyDown={(e) => handleTab(e, "cue")}
         >
           <FieldLabel icon={KeyRound} title="線索欄" hint="關鍵字 / @ai 疑問" />
@@ -94,7 +94,11 @@ export default function CornellNotesEditor({
           />
         </div>
 
-        <div ref={notesWrap} className="p-4" onKeyDown={(e) => handleTab(e, "notes")}>
+        <div
+          ref={notesWrap}
+          className="p-4 min-w-0"
+          onKeyDown={(e) => handleTab(e, "notes")}
+        >
           <FieldLabel icon={PenLine} title="筆記欄" hint="會議中隨手記錄" />
           <MeetingNotesEditor
             {...editorProps}

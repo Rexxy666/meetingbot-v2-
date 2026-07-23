@@ -413,10 +413,10 @@ export default function MeetingAnalytics({ meeting, review, actions = [], durati
         <Kpi
           icon={CheckCircle2}
           label="決議產出"
-          value={decisions.length || decisionPriority.points.length}
+          value={decisions.length}
           unit="項"
           tone="blue"
-          hint={decisions.length ? "已形成明確結論" : "示意／待補決議"}
+          hint={decisions.length ? "已形成明確結論" : "尚未形成決議"}
         />
         <Kpi
           icon={TrendingUp}
@@ -499,7 +499,7 @@ export default function MeetingAnalytics({ meeting, review, actions = [], durati
 
       <p className="flex items-start gap-2 text-sm text-slate-600 dark:text-slate-400 px-1 leading-relaxed">
         <Sparkles className="h-4 w-4 shrink-0 mt-0.5" strokeWidth={2} />
-        圖表以「問題解決與決策品質」為核心：痛點轉化、決議優先序、待辦領域重心皆由本場會議資料推算；不足時顯示示意結構。
+        圖表以「問題解決與決策品質」為核心：痛點轉化、決議優先序、待辦領域重心皆 100% 由本場會議實際資料推算；資料不足時如實顯示空狀態，不套用任何示意數字。
         {durationMin ? ` 本場實際歷時約 ${durationMin} 分鐘。` : ""}
       </p>
     </section>

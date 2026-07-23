@@ -85,9 +85,38 @@ export function useMeetings(enabled = true) {
 
       try {
         const updated = await api.patchMeeting(id, patchBody);
-        setMeetings((prev) => prev.map((m) => (m.id === id ? updated : m)));
+        setMeetings((prev) =>
+          prev.map((m) => {
+            if (m.id !== id) return m;
+            const merged = { ...m, ...updated };
+            // 若本次明確結束會議，即使後端回傳舊文件也強制保留結束狀態
+            if (patchBody.status === "done" || patchBody.meetingStatus === "ended") {
+              merged.status = "done";
+              merged.meetingStatus = "ended";
+              merged.endedAt = patchBody.endedAt || updated?.endedAt || Date.now();
+            }
+            return merged;
+          })
+        );
         return updated;
       } catch (e) {
+        // 結束會議：失敗也不回滾成 live，避免看板／PIP 殘留「進行中」
+        if (patchBody.status === "done" || patchBody.meetingStatus === "ended") {
+          setMeetings((prev) =>
+            prev.map((m) =>
+              m.id === id
+                ? {
+                    ...m,
+                    ...patchBody,
+                    status: "done",
+                    meetingStatus: "ended",
+                    endedAt: patchBody.endedAt || Date.now(),
+                  }
+                : m
+            )
+          );
+          throw e;
+        }
         await refreshMeetings();
         throw e;
       }

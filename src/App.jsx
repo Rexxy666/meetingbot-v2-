@@ -22,6 +22,12 @@ import { useMode } from "./lib/settings.js";
 import { useTheme } from "./lib/theme.js";
 import * as api from "./lib/api.js";
 import { defaultMediaSettings, discardMediaHandoff } from "./lib/mediaSettings.js";
+import {
+  clearActiveLiveMeetingId,
+  getActiveLiveMeetingId,
+  isMeetingEnded,
+  isMeetingLive,
+} from "./lib/activeMeeting.js";
 
 function parseLiveHash() {
   const hash = window.location.hash || "";
@@ -32,7 +38,7 @@ function parseLiveHash() {
 export default function App() {
   const auth = useAuth();
   const [page, setPage] = useState("dashboard");
-  const [activeId, setActiveId] = useState(null);
+  const [activeId, setActiveId] = useState(() => getActiveLiveMeetingId() || null);
   const [mode, setMode] = useMode();
   const theme = useTheme();
   const [joinError, setJoinError] = useState(null);
@@ -61,10 +67,22 @@ export default function App() {
     }
   }, [active?.id, activeId]);
 
-  // 浮窗僅在真正進行中（live）時顯示
+  // 已結束的會議：清掉 activeId／PIP，避免看板誤顯「回到會議」
+  useEffect(() => {
+    if (!activeId) return;
+    const m = meetings.find((row) => row.id === activeId);
+    if (m && isMeetingEnded(m)) {
+      clearActiveLiveMeetingId(activeId);
+      if (page === "dashboard" || page === "todo" || page === "friends") {
+        setActiveId(null);
+      }
+    }
+  }, [meetings, activeId, page]);
+
+  // 浮窗僅在真正進行中（live 且未 ended）時顯示
   const liveMeeting = useMemo(() => {
-    if (!active || active.status === "done") return null;
-    return active.status === "live" ? active : null;
+    if (!active || !isMeetingLive(active)) return null;
+    return active;
   }, [active]);
   // 浮窗：正在會議中且已離開會議室／大廳頁時浮現
   const widgetVisible = Boolean(liveMeeting) && page !== "live" && page !== "prejoin";
@@ -77,6 +95,25 @@ export default function App() {
   );
 
   const go = (p, id = null) => {
+    if (p === "dashboard") {
+      // 回到看板：若目前選中會議已結束，清掉 PIP 錨點
+      setActiveId((curr) => {
+        const nextId = id !== null ? id : curr;
+        const m = meetings.find((row) => row.id === nextId);
+        if (m && isMeetingEnded(m)) {
+          clearActiveLiveMeetingId(nextId);
+          return null;
+        }
+        if (id !== null) return id;
+        if (curr && isMeetingEnded(meetings.find((row) => row.id === curr))) {
+          clearActiveLiveMeetingId(curr);
+          return null;
+        }
+        return curr;
+      });
+      setPage(p);
+      return;
+    }
     if (id !== null) setActiveId(id);
     setPage(p);
   };
@@ -218,6 +255,7 @@ export default function App() {
               meetings={meetings}
               friends={social.friends}
               go={go}
+              updateProfile={auth.updateProfile}
             />
           )}
           {page === "settings" && (

@@ -1,6 +1,6 @@
-import { useCallback, useEffect, useRef, useState } from "react";
-import { askLiveSilentAi } from "../lib/api.js";
-import { buildSilentAskPayload, typewriterStream } from "../lib/silentAiAsk.js";
+import { cloneElement, isValidElement, useCallback, useEffect, useRef, useState } from "react";
+import { askLiveSilentAiStream } from "../lib/api.js";
+import { buildSilentAskPayload } from "../lib/silentAiAsk.js";
 import {
   appendTextToNotes,
   createId,
@@ -82,12 +82,22 @@ export default function MeetingNotesWithBottomAIPanel({
   const runAi = useCallback(
     async (aiId, question) => {
       if (!aiContext) return;
+      const q = String(question || "").trim();
+      if (!q) {
+        updateAiBlock(aiId, {
+          status: "error",
+          answer: "請先輸入或說出問題",
+        });
+        return;
+      }
       abortMap.current.get(aiId)?.abort?.();
       const ac = new AbortController();
       abortMap.current.set(aiId, ac);
 
+      updateAiBlock(aiId, { status: "thinking", answer: "" }, { stream: true });
+
       const packed = buildSilentAskPayload({
-        question,
+        question: q,
         transcriptRows: aiContext.transcriptRows || [],
         title: aiContext.title || "",
         topic: aiContext.topic || "",
@@ -95,26 +105,14 @@ export default function MeetingNotesWithBottomAIPanel({
       });
 
       try {
-        let answerText = "";
-        try {
-          const res = await askLiveSilentAi(packed);
-          answerText = String(res?.answer || "").trim();
-        } catch {
-          answerText = `（離線示意）針對「${question}」：建議先對齊目標、依賴與下一步行動。`;
-        }
-        if (!answerText) answerText = "AI 未回傳內容，請稍後再試。";
-
-        updateAiBlock(aiId, { status: "streaming", answer: "" }, { stream: true });
-        await typewriterStream(answerText, {
-          cps: 42,
+        const { answer } = await askLiveSilentAiStream(packed, {
           signal: ac.signal,
           onChunk: (partial) =>
             updateAiBlock(aiId, { status: "streaming", answer: partial }, { stream: syncOnStream }),
-          onDone: (full) => {
-            updateAiBlock(aiId, { status: "done", answer: full });
-            abortMap.current.delete(aiId);
-          },
         });
+        const full = String(answer || "").trim() || "AI 未回傳內容，請稍後再試。";
+        updateAiBlock(aiId, { status: "done", answer: full });
+        abortMap.current.delete(aiId);
       } catch (e) {
         if (ac.signal.aborted) return;
         updateAiBlock(aiId, { status: "error", answer: e?.message || "詢問失敗" });
@@ -147,6 +145,16 @@ export default function MeetingNotesWithBottomAIPanel({
     [disabled, aiContext, commit, runAi]
   );
 
+  const retryAi = useCallback(
+    (item) => {
+      const id = item?.id;
+      const q = String(item?.question || "").trim();
+      if (!id || !q) return;
+      runAi(id, q);
+    },
+    [runAi]
+  );
+
   /** 從 @ 選單觸發：展開面板並把游標移到面板輸入框 */
   const focusPanelInput = useCallback(() => {
     setOpen(true);
@@ -167,16 +175,6 @@ export default function MeetingNotesWithBottomAIPanel({
     [disabled, onChange]
   );
 
-  const deleteItem = useCallback(
-    (aiId) => {
-      abortMap.current.get(aiId)?.abort?.();
-      abortMap.current.delete(aiId);
-      const current = parseNotesDoc(valueRef.current);
-      commit({ v: 1, blocks: current.blocks.filter((b) => b.id !== aiId) });
-    },
-    [commit]
-  );
-
   useEffect(
     () => () => {
       abortMap.current.forEach((ac) => ac.abort());
@@ -184,6 +182,20 @@ export default function MeetingNotesWithBottomAIPanel({
     },
     []
   );
+
+  const voiceSlotInjected =
+    voiceSlot && isValidElement(voiceSlot)
+      ? cloneElement(voiceSlot, {
+          onAsk: askAi,
+          onVoiceDraftChange: (text) => {
+            setOpen(true);
+            setDraft(String(text || ""));
+          },
+          onListeningChange: (listening) => {
+            if (listening) setOpen(true);
+          },
+        })
+      : voiceSlot;
 
   return (
     <div className={`flex flex-col min-h-0 ${className}`}>
@@ -211,12 +223,12 @@ export default function MeetingNotesWithBottomAIPanel({
         onDraftChange={setDraft}
         onSubmit={askAi}
         onCopyToNotes={copyToNotes}
-        onDelete={deleteItem}
+        onRetry={retryAi}
         copiedId={copiedId}
         inputRef={inputRef}
         disabled={disabled || !aiContext}
         busy={busy}
-        voiceSlot={voiceSlot}
+        voiceSlot={voiceSlotInjected}
       />
     </div>
   );

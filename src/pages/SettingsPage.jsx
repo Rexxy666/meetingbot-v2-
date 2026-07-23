@@ -108,7 +108,7 @@ export default function SettingsPage({ user, mode, setMode, updateProfile, theme
         {/* 基本資料 */}
         <Section icon={User} title="基本資料" desc="顯示名稱會出現在會議與協作中">
           <div className="flex items-center gap-3 mb-4">
-            <Avatar name={name.trim() || "U"} size="h-12 w-12" />
+            <Avatar name={name.trim() || "U"} src={user?.photoURL} color={user?.avatarColor || "bg-mint-500"} size="h-12 w-12" />
             <div className="min-w-0">
               <p className="text-[11px] text-navy-300">登入帳號</p>
               <p className="text-sm font-medium text-navy-600 truncate">{user?.email}</p>

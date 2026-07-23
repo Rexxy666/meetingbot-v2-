@@ -39,6 +39,10 @@ export function useLocalMediaAndStt({
   const localVideoRef = useRef(null);
   const screenVideoRef = useRef(null);
   const recognitionRef = useRef(null);
+  const silenceTimerRef = useRef(null);
+  const interimRef = useRef("");
+  const lastEmittedRef = useRef("");
+  const lastEmitAtRef = useRef(0);
   const wantMicRef = useRef(initial.isMuted === false);
   const wantCamRef = useRef(initial.isVideoOff === false);
   const wantSttRef = useRef(false);
@@ -182,8 +186,66 @@ export function useLocalMediaAndStt({
     if (wantCamRef.current) attachLocalPreview();
   }, [attachLocalPreview]);
 
+  const clearSilenceTimer = useCallback(() => {
+    if (silenceTimerRef.current) {
+      clearTimeout(silenceTimerRef.current);
+      silenceTimerRef.current = null;
+    }
+  }, []);
+
+  const emitFinalUtterance = useCallback((rawText, { upgradeFrom = "" } = {}) => {
+    const text = String(rawText || "").trim();
+    if (!text) return false;
+
+    const norm = (s) => String(s || "").replace(/\s+/g, "");
+    const a = norm(text);
+    const b = norm(lastEmittedRef.current);
+    const recent = Date.now() - lastEmitAtRef.current < 2800;
+
+    // 與剛送出的句子完全相同，或新句是舊句的嚴格前綴（較短 interim）→ 略過
+    if (recent && b && (a === b || (a.length < b.length && b.startsWith(a)))) {
+      interimRef.current = "";
+      setInterimText("");
+      clearSilenceTimer();
+      return false;
+    }
+
+    lastEmittedRef.current = text;
+    lastEmitAtRef.current = Date.now();
+    interimRef.current = "";
+    setInterimText("");
+    clearSilenceTimer();
+
+    onFinalRef.current?.({
+      id: `stt-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`,
+      time: nowTime(),
+      at: Date.now(),
+      speaker: speakerRef.current,
+      text,
+      // 只在「同一句 interim → final 升級」時帶 upgradeFrom，避免誤刪上一句
+      upgradeFrom: upgradeFrom || undefined,
+    });
+    return true;
+  }, [clearSilenceTimer]);
+
+  const scheduleForceFinalize = useCallback(() => {
+    clearSilenceTimer();
+    silenceTimerRef.current = window.setTimeout(() => {
+      silenceTimerRef.current = null;
+      const pending = String(interimRef.current || "").trim();
+      if (pending) emitFinalUtterance(pending);
+    }, 1400);
+  }, [clearSilenceTimer, emitFinalUtterance]);
+
+  const flushInterimIfAny = useCallback(() => {
+    clearSilenceTimer();
+    const pending = String(interimRef.current || "").trim();
+    if (pending) emitFinalUtterance(pending);
+  }, [clearSilenceTimer, emitFinalUtterance]);
+
   const stopSpeechRecognition = useCallback(() => {
     wantSttRef.current = false;
+    flushInterimIfAny();
     const rec = recognitionRef.current;
     if (rec) {
       try {
@@ -197,8 +259,9 @@ export function useLocalMediaAndStt({
       recognitionRef.current = null;
     }
     setSttListening(false);
+    interimRef.current = "";
     setInterimText("");
-  }, []);
+  }, [flushInterimIfAny]);
 
   const startSpeechRecognition = useCallback(() => {
     const Ctor = getSpeechRecognitionCtor();
@@ -213,7 +276,33 @@ export function useLocalMediaAndStt({
       return;
     }
     wantSttRef.current = true;
-    if (recognitionRef.current) return;
+
+    // 已有實例：嘗試再 start（Chrome 常在 onend 後需重啟同一物件）
+    if (recognitionRef.current) {
+      try {
+        recognitionRef.current.start();
+        setSttListening(true);
+        setSttError(null);
+        return;
+      } catch (err) {
+        const name = err?.name || "";
+        const msg = String(err?.message || "");
+        // 已在 listening 時 start 會丟 InvalidStateError → 視為正常
+        if (name === "InvalidStateError" || /already started/i.test(msg)) {
+          setSttListening(true);
+          return;
+        }
+        try {
+          recognitionRef.current.onend = null;
+          recognitionRef.current.onerror = null;
+          recognitionRef.current.onresult = null;
+          recognitionRef.current.stop();
+        } catch {
+          /* ignore */
+        }
+        recognitionRef.current = null;
+      }
+    }
 
     const rec = new Ctor();
     rec.continuous = true;
@@ -223,24 +312,45 @@ export function useLocalMediaAndStt({
 
     rec.onresult = (event) => {
       let interim = "";
+      let sawFinal = false;
       for (let i = event.resultIndex; i < event.results.length; i += 1) {
         const result = event.results[i];
         const text = String(result[0]?.transcript || "").trim();
         if (!text) continue;
         if (result.isFinal) {
-          setInterimText("");
-          onFinalRef.current?.({
-            id: `stt-${Date.now()}-${i}`,
-            time: nowTime(),
-            at: Date.now(),
-            speaker: speakerRef.current,
-            text,
-          });
+          sawFinal = true;
+          const prevInterim = String(interimRef.current || "").trim();
+          const lastEmitted = String(lastEmittedRef.current || "").trim();
+          // 同句升級：interim→final，或 silence-force 後的加長 final
+          let upgradeFrom = "";
+          if (
+            prevInterim &&
+            (text === prevInterim ||
+              text.startsWith(prevInterim) ||
+              prevInterim.startsWith(text))
+          ) {
+            upgradeFrom = prevInterim;
+          } else if (
+            lastEmitted &&
+            text.startsWith(lastEmitted) &&
+            text.length > lastEmitted.length
+          ) {
+            upgradeFrom = lastEmitted;
+          }
+          emitFinalUtterance(text, { upgradeFrom });
         } else {
-          interim += text;
+          interim += (interim ? " " : "") + text;
         }
       }
-      if (interim) setInterimText(interim);
+      if (interim) {
+        interimRef.current = interim;
+        setInterimText(interim);
+        scheduleForceFinalize();
+      } else if (sawFinal) {
+        interimRef.current = "";
+        setInterimText("");
+        clearSilenceTimer();
+      }
     };
 
     rec.onerror = (event) => {
@@ -249,20 +359,44 @@ export function useLocalMediaAndStt({
         setSttError("麥克風權限被拒，無法語音轉文字");
         wantSttRef.current = false;
         setSttListening(false);
+        clearSilenceTimer();
         return;
       }
-      if (code === "no-speech" || code === "aborted") return;
+      // no-speech / aborted / network：交給 onend 自動重連，勿永久停掉
+      if (code === "no-speech" || code === "aborted" || code === "network") {
+        flushInterimIfAny();
+        return;
+      }
       setSttError(`語音辨識：${code}`);
     };
 
     rec.onend = () => {
-      recognitionRef.current = null;
+      // 長停頓或瀏覽器自行結束時，若會議仍要收音 → 立刻重啟同一實例
+      flushInterimIfAny();
       setSttListening(false);
-      if (wantSttRef.current && wantMicRef.current && enabled) {
-        window.setTimeout(() => {
-          if (wantSttRef.current && wantMicRef.current) startSpeechRecognition();
-        }, 250);
+      if (!(wantSttRef.current && wantMicRef.current && enabled)) {
+        recognitionRef.current = null;
+        return;
       }
+      const restart = (delay = 120) => {
+        window.setTimeout(() => {
+          if (!(wantSttRef.current && wantMicRef.current && enabled)) return;
+          try {
+            rec.start();
+            setSttListening(true);
+            setSttError(null);
+          } catch {
+            // 重建實例再試
+            recognitionRef.current = null;
+            window.setTimeout(() => {
+              if (wantSttRef.current && wantMicRef.current && enabled) {
+                startSpeechRecognition();
+              }
+            }, 280);
+          }
+        }, delay);
+      };
+      restart(120);
     };
 
     recognitionRef.current = rec;
@@ -273,9 +407,36 @@ export function useLocalMediaAndStt({
     } catch (err) {
       recognitionRef.current = null;
       setSttListening(false);
-      setSttError(err?.message || "無法啟動語音辨識");
+      // 啟動失敗仍排程重試，避免「講幾句後永久靜音」
+      if (wantSttRef.current && wantMicRef.current && enabled) {
+        window.setTimeout(() => {
+          if (wantSttRef.current && wantMicRef.current && enabled) {
+            startSpeechRecognition();
+          }
+        }, 400);
+      } else {
+        setSttError(err?.message || "無法啟動語音辨識");
+      }
     }
-  }, [enabled, lang]);
+  }, [
+    enabled,
+    lang,
+    clearSilenceTimer,
+    emitFinalUtterance,
+    scheduleForceFinalize,
+    flushInterimIfAny,
+  ]);
+
+  // 看門狗：想收音但實際未 listening 時強制重連（防 onend 漏接）
+  useEffect(() => {
+    if (!enabled) return undefined;
+    const id = window.setInterval(() => {
+      if (!wantSttRef.current || !wantMicRef.current) return;
+      if (recognitionRef.current && sttListening) return;
+      startSpeechRecognition();
+    }, 2500);
+    return () => window.clearInterval(id);
+  }, [enabled, sttListening, startSpeechRecognition]);
 
   const startMedia = useCallback(
     async ({ mic = true, cam = true } = {}) => {

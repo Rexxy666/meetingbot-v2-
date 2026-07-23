@@ -53,6 +53,28 @@ export function setCachedSummary(meetingId, sourceText, payload) {
   return key;
 }
 
+/** 刪除會議時清掉該場所有 AI 摘要快取（記憶體 + sessionStorage） */
+export function clearCachedSummariesForMeeting(meetingId) {
+  const id = String(meetingId || "");
+  if (!id) return;
+  const prefix = `${id}:`;
+  for (const key of [...memory.keys()]) {
+    if (key === id || key.startsWith(prefix)) memory.delete(key);
+  }
+  try {
+    const toRemove = [];
+    for (let i = 0; i < sessionStorage.length; i += 1) {
+      const full = sessionStorage.key(i);
+      if (!full || !full.startsWith(STORAGE_PREFIX)) continue;
+      const key = full.slice(STORAGE_PREFIX.length);
+      if (key === id || key.startsWith(prefix)) toRemove.push(full);
+    }
+    toRemove.forEach((k) => sessionStorage.removeItem(k));
+  } catch {
+    /* ignore */
+  }
+}
+
 /** 將逐字稿陣列格式化成餵給 Gemini 的純文字 */
 export function formatTranscriptForAi(transcript = []) {
   if (!Array.isArray(transcript) || !transcript.length) return "";

@@ -8,7 +8,8 @@
 2. 啟用 **Firestore**（正式環境）
 3. 專案設定 → 新增 Web App → 複製設定到前端 `VITE_FIREBASE_*`
 4. 專案設定 → 服務帳戶 → 產生新的私密金鑰 → JSON 內容貼到 Render 的 `FIREBASE_SERVICE_ACCOUNT_JSON`
-5. 授權網域加入你的 Hosting 網域
+5. 啟用 **Storage**，並部署規則：`npx firebase deploy --only storage`
+6. 授權網域加入你的 Hosting 網域
 
 ## 2. 本機 / Hosting 前端環境
 

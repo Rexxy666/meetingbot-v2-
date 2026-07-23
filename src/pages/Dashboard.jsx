@@ -4,20 +4,44 @@ import {
   CalendarDays,
   CalendarOff,
   Check,
+  ChevronDown,
+  ClipboardList,
   MoreHorizontal,
+  MoreVertical,
   Plus,
   Sparkles,
   Trash2,
 } from "lucide-react";
 import { API_BASE, joinMeetingByLink } from "../lib/api.js";
 import { getMode } from "../config/meetingConfig.js";
+import { clearCachedSummariesForMeeting } from "../lib/meetingsCache.js";
+import { clearLiveTranscript } from "../lib/liveTranscriptCache.js";
+import { isMeetingEnded, isMeetingLive } from "../lib/activeMeeting.js";
 import { useTheme } from "../lib/theme.js";
 import PreJoinConfirmModal from "../components/PreJoinConfirmModal.jsx";
+import { formatScheduledLabel } from "../components/CreatedInviteModal.jsx";
 
 const CARD = "bg-white border border-gray-100 shadow-sm rounded-2xl";
 
 const CTRL =
   "h-10 box-border rounded-xl border border-gray-100 bg-white text-sm text-navy-800 shadow-sm transition-colors focus:outline-none focus:border-mint-300 focus:ring-2 focus:ring-mint-100";
+
+/**
+ * ⚡ 即時會議按鈕配色。
+ * 淺色：品牌高亮實心綠；深色：暗綠底 + 亮綠字 + 低調邊框（護眼，不刺眼）。
+ */
+function instantBtnCls(isDark) {
+  return isDark
+    ? "bg-emerald-950/60 text-emerald-400 border border-emerald-500/40 hover:bg-emerald-900/50 hover:border-emerald-400/50"
+    : "bg-mint-600 text-white border border-transparent shadow-sm hover:bg-mint-700";
+}
+
+/** 規劃會議（次要）按鈕配色：邊框樣式，淺／深皆和緩。 */
+function planBtnCls(isDark) {
+  return isDark
+    ? "bg-slate-800 text-slate-200 border border-slate-600 hover:border-cyan-500/50 hover:text-white"
+    : "bg-white text-navy-700 border border-gray-100 hover:border-navy-800/15";
+}
 
 function formatShortDate(ts) {
   if (!ts) return "—";
@@ -44,8 +68,8 @@ function parseJoinCode(raw) {
   return s.replace(/\s|-/g, "");
 }
 
-function StatusBadge({ status, isDark }) {
-  if (status === "live") {
+function StatusBadge({ status, meetingStatus, isDark }) {
+  if (isMeetingLive({ status, meetingStatus })) {
     return (
       <span
         className={`shrink-0 inline-flex items-center gap-1.5 text-[11px] font-semibold px-2 py-0.5 rounded-full border ${
@@ -92,27 +116,33 @@ function StatusBadge({ status, isDark }) {
   );
 }
 
-function DeleteConfirmModal({ busy, onCancel, onConfirm }) {
+function DeleteConfirmModal({
+  busy,
+  onCancel,
+  onConfirm,
+  title = "刪除會議紀錄",
+  description = "確定要刪除此會議紀錄嗎？此操作將永久移除所有筆記與待辦任務，且無法復原。",
+}) {
   return (
     <div className="fixed inset-0 z-[70] flex items-center justify-center p-4" onClick={busy ? undefined : onCancel}>
-      <div className="absolute inset-0 bg-navy-900/30 backdrop-blur-sm" />
+      <div className="absolute inset-0 bg-navy-900/35 backdrop-blur-md" />
       <div
-        className={`relative w-full max-w-md ${CARD} p-6 fade-in`}
+        className={`relative w-full max-w-md rounded-2xl border border-white/50 bg-white/90 p-6 shadow-card-hover backdrop-blur-xl ring-1 ring-navy-800/10 fade-in dark:border-slate-600/40 dark:bg-slate-900/85 dark:ring-white/5`}
         onClick={(e) => e.stopPropagation()}
         role="dialog"
         aria-modal="true"
         aria-labelledby="delete-meeting-title"
       >
         <div className="flex items-start gap-3">
-          <div className="shrink-0 h-10 w-10 rounded-xl bg-coral-50 text-coral-500 border border-coral-100 flex items-center justify-center">
+          <div className="shrink-0 h-10 w-10 rounded-xl bg-red-50 text-red-500 border border-red-100 flex items-center justify-center dark:bg-red-950/40 dark:text-red-400 dark:border-red-500/25">
             <Trash2 className="h-4 w-4" strokeWidth={1.8} />
           </div>
           <div className="min-w-0">
-            <h3 id="delete-meeting-title" className="text-base font-bold text-navy-800">
-              刪除會議紀錄
+            <h3 id="delete-meeting-title" className="text-base font-bold text-navy-800 dark:text-white">
+              {title}
             </h3>
-            <p className="mt-1.5 text-sm text-navy-500 leading-relaxed">
-              確定要刪除此會議紀錄嗎？此操作將永久移除所有筆記與待辦任務，且無法復原。
+            <p className="mt-1.5 text-sm text-navy-500 leading-relaxed dark:text-slate-300">
+              {description}
             </p>
           </div>
         </div>
@@ -121,7 +151,7 @@ function DeleteConfirmModal({ busy, onCancel, onConfirm }) {
             type="button"
             disabled={busy}
             onClick={onCancel}
-            className="flex-1 font-medium py-2.5 rounded-xl text-navy-500 border border-gray-100 hover:bg-gray-50 transition-colors disabled:opacity-50"
+            className="flex-1 font-medium py-2.5 rounded-xl text-navy-500 bg-gray-100/80 border border-gray-100 hover:bg-gray-100 transition-colors disabled:opacity-50 dark:bg-slate-800 dark:text-slate-300 dark:border-slate-600 dark:hover:bg-slate-700"
           >
             取消
           </button>
@@ -129,7 +159,7 @@ function DeleteConfirmModal({ busy, onCancel, onConfirm }) {
             type="button"
             disabled={busy}
             onClick={onConfirm}
-            className="flex-1 font-medium py-2.5 rounded-xl bg-coral-500 text-white hover:bg-coral-600 transition-colors disabled:opacity-60"
+            className="flex-1 font-medium py-2.5 rounded-xl bg-red-500 text-white hover:bg-red-600 transition-colors disabled:opacity-60 dark:bg-red-600 dark:hover:bg-red-500"
           >
             {busy ? "刪除中…" : "確認刪除"}
           </button>
@@ -141,7 +171,8 @@ function DeleteConfirmModal({ busy, onCancel, onConfirm }) {
 
 function MeetingCard({ m, go, onDelete, me, isDark, onRequestJoin }) {
   const isOwner = !me || m.ownerId === me.id;
-  const isLive = m.status === "live";
+  const isLive = isMeetingLive(m);
+  const isDone = isMeetingEnded(m);
   const canShowMore = isOwner && !isLive;
   const openDone = (m.actions || []).filter((a) => !a.done).length;
 
@@ -151,11 +182,11 @@ function MeetingCard({ m, go, onDelete, me, isDark, onRequestJoin }) {
   const menuRef = useRef(null);
 
   const primary =
-    m.status === "done"
+    isDone
       ? { label: "查看整理", to: "post" }
       : isLive
       ? { label: "回到會議", to: "live" }
-      : { label: "進入會議", to: "live" };
+      : { label: "進入準備", to: "live" };
 
   useEffect(() => {
     if (!menuOpen) return undefined;
@@ -182,6 +213,8 @@ function MeetingCard({ m, go, onDelete, me, isDark, onRequestJoin }) {
     setDeleting(true);
     try {
       await onDelete(m.id);
+      clearCachedSummariesForMeeting(m.id);
+      clearLiveTranscript(m.id);
       setConfirmOpen(false);
     } finally {
       setDeleting(false);
@@ -209,7 +242,7 @@ function MeetingCard({ m, go, onDelete, me, isDark, onRequestJoin }) {
               ? isDark
                 ? "bg-slate-800 border-slate-600"
                 : "bg-coral-50"
-              : m.status === "done"
+              : isDone
               ? isDark
                 ? "bg-slate-800/60 border-slate-600/50"
                 : "bg-gray-50"
@@ -224,7 +257,7 @@ function MeetingCard({ m, go, onDelete, me, isDark, onRequestJoin }) {
                 ? isDark
                   ? "text-slate-300"
                   : "text-coral-500"
-                : m.status === "done"
+                : isDone
                 ? isDark
                   ? "text-slate-400"
                   : "text-navy-400"
@@ -241,7 +274,7 @@ function MeetingCard({ m, go, onDelete, me, isDark, onRequestJoin }) {
             <p className={`font-semibold truncate ${isDark ? "text-white" : "text-navy-800"}`}>
               {m.title}
             </p>
-            <StatusBadge status={m.status} isDark={isDark} />
+            <StatusBadge status={m.status} meetingStatus={m.meetingStatus} isDark={isDark} />
           </div>
           <div className="mt-1 flex items-center gap-1.5 flex-wrap min-w-0">
             {m.scenarioLabel && (
@@ -267,8 +300,10 @@ function MeetingCard({ m, go, onDelete, me, isDark, onRequestJoin }) {
               </span>
             )}
             <span className={`text-xs truncate ${isDark ? "text-slate-400" : "text-navy-400"}`}>
-              {m.durationMin} 分鐘 · 目標 {(m.goals || []).length} 項
-              {m.status === "done" && openDone > 0 ? ` · ${openDone} 項待辦` : ""}
+              {m.scheduledAt
+                ? formatScheduledLabel(m.scheduledAt, m.durationMin)
+                : `${m.durationMin} 分鐘 · 目標 ${(m.goals || []).length} 項`}
+              {isDone && openDone > 0 ? ` · ${openDone} 項待辦` : ""}
             </span>
           </div>
         </div>
@@ -336,43 +371,97 @@ function MeetingCard({ m, go, onDelete, me, isDark, onRequestJoin }) {
   );
 }
 
-function EmptyMeetings({ go, onJoined }) {
+function EmptyMeetings({ go, onInstant, instantBusy = false, isDark = false }) {
   return (
     <div className={`${CARD} px-6 py-12 text-center`}>
       <div className="mx-auto flex h-12 w-12 items-center justify-center rounded-xl border border-gray-100 text-navy-300">
         <CalendarOff className="h-5 w-5" strokeWidth={1.6} />
       </div>
       <p className="mt-4 font-semibold text-navy-800">目前沒有進行中的會議</p>
-      <p className="mt-1 text-sm text-navy-400">發起一場，或用上方代碼加入既有會議。</p>
-      <div className="mt-5 flex flex-col sm:flex-row items-center justify-center gap-2">
+      <p className="mt-1 text-sm text-navy-400">臨時要拉人？一鍵快速開會，或做完整規劃。</p>
+      <div className="mt-5 flex flex-col sm:flex-row items-center justify-center gap-2.5">
+        <button
+          type="button"
+          disabled={instantBusy}
+          onClick={() => onInstant?.()}
+          className={`h-10 box-border inline-flex items-center justify-center rounded-xl px-4 py-2.5 text-sm font-medium transition-all active:scale-95 disabled:opacity-60 disabled:cursor-wait ${instantBtnCls(
+            isDark
+          )}`}
+        >
+          {instantBusy ? "開啟中…" : "一鍵快速開會"}
+        </button>
         <button
           type="button"
           onClick={() => go("create")}
-          className="inline-flex items-center gap-1.5 rounded-xl border border-gray-100 bg-white px-4 py-2 text-sm font-medium text-navy-700 hover:border-mint-200 hover:text-mint-700 transition-colors"
+          className={`inline-flex items-center justify-center gap-1.5 rounded-xl px-4 py-2.5 text-sm font-semibold transition-colors ${planBtnCls(
+            isDark
+          )}`}
         >
-          <Plus className="h-4 w-4" strokeWidth={2.2} />
-          發起會議
+          <ClipboardList className="h-4 w-4" strokeWidth={2} />
+          完整規劃會議
         </button>
-        {onJoined && (
-          <button
-            type="button"
-            onClick={() => {
-              const el = document.getElementById("join-meeting-code");
-              el?.focus?.();
-              el?.scrollIntoView?.({ behavior: "smooth", block: "center" });
-            }}
-            className="inline-flex items-center gap-1.5 rounded-xl border border-mint-100 bg-mint-50 px-4 py-2 text-sm font-medium text-mint-700 hover:bg-mint-100 transition-colors lg:hidden"
-          >
-            輸入代碼加入
-          </button>
-        )}
       </div>
     </div>
   );
 }
 
-function RecentRecap({ items, go }) {
-  if (!items.length) {
+function RecentRecap({ items, go, onDelete }) {
+  const [menuOpenId, setMenuOpenId] = useState(null);
+  const [confirmTarget, setConfirmTarget] = useState(null);
+  const [deleting, setDeleting] = useState(false);
+  const [collapsingIds, setCollapsingIds] = useState(() => new Set());
+  const [hiddenIds, setHiddenIds] = useState(() => new Set());
+  const menuRef = useRef(null);
+
+  useEffect(() => {
+    if (!menuOpenId) return undefined;
+    const onPointerDown = (e) => {
+      if (menuRef.current && !menuRef.current.contains(e.target)) setMenuOpenId(null);
+    };
+    const onKey = (e) => {
+      if (e.key === "Escape") setMenuOpenId(null);
+    };
+    document.addEventListener("pointerdown", onPointerDown);
+    document.addEventListener("keydown", onKey);
+    return () => {
+      document.removeEventListener("pointerdown", onPointerDown);
+      document.removeEventListener("keydown", onKey);
+    };
+  }, [menuOpenId]);
+
+  const visibleItems = items.filter((m) => !hiddenIds.has(m.id));
+
+  const requestDelete = (m) => {
+    setMenuOpenId(null);
+    setConfirmTarget(m);
+  };
+
+  const confirmDelete = async () => {
+    if (!confirmTarget || !onDelete) return;
+    const id = confirmTarget.id;
+    setDeleting(true);
+    try {
+      await onDelete(id);
+      clearCachedSummariesForMeeting(id);
+      clearLiveTranscript(id);
+      setConfirmTarget(null);
+      setCollapsingIds((prev) => new Set(prev).add(id));
+      window.setTimeout(() => {
+        setHiddenIds((prev) => new Set(prev).add(id));
+        setCollapsingIds((prev) => {
+          const next = new Set(prev);
+          next.delete(id);
+          return next;
+        });
+      }, 320);
+    } catch {
+      /* store 已處理錯誤；維持 Modal 讓使用者可再試或取消 */
+    } finally {
+      setDeleting(false);
+    }
+  };
+
+  if (!items.length || visibleItems.length === 0) {
     return (
       <section>
         <h2 className="text-sm font-semibold text-navy-500 tracking-wide">最近回顧</h2>
@@ -384,29 +473,89 @@ function RecentRecap({ items, go }) {
   }
 
   return (
-    <section>
+    <section className="relative z-0">
       <h2 className="text-sm font-semibold text-navy-500 tracking-wide">最近回顧</h2>
-      <div className={`${CARD} mt-3 divide-y divide-gray-100`}>
-        {items.map((m) => (
-          <div key={m.id} className="flex items-center gap-3 px-4 py-3">
-            <div className="min-w-0 flex-1">
-              <p className="text-sm font-medium text-navy-800 truncate">{m.title}</p>
-              <p className="text-[11px] text-navy-400 mt-0.5">
-                {formatShortDate(m.endedAt || m.updatedAt || m.createdAt)}
-                {m.scenarioLabel ? ` · ${m.scenarioLabel}` : ""}
-              </p>
-            </div>
-            <button
-              type="button"
-              onClick={() => go("post", m.id)}
-              className="shrink-0 inline-flex items-center gap-1 text-[11px] font-medium text-mint-700 border border-mint-100 bg-mint-50/60 px-2.5 py-1.5 rounded-lg hover:bg-mint-50 transition-colors"
+      <div className={`${CARD} mt-3 divide-y divide-gray-100 overflow-visible`}>
+        {visibleItems.map((m, index) => {
+          const collapsing = collapsingIds.has(m.id);
+          const menuOpen = menuOpenId === m.id;
+          const openUpward = index >= visibleItems.length - 1;
+          return (
+            <div
+              key={m.id}
+              className={`transition-all duration-300 ease-in-out ${
+                collapsing
+                  ? "max-h-0 opacity-0 overflow-hidden pointer-events-none"
+                  : "max-h-none opacity-100 overflow-visible"
+              } ${menuOpen ? "relative z-[100]" : "relative z-0"}`}
             >
-              <Sparkles className="h-3 w-3" strokeWidth={2} />
-              AI 總結
-            </button>
-          </div>
-        ))}
+              <div className="flex items-center gap-2 sm:gap-3 px-4 py-3">
+                <div className="min-w-0 flex-1">
+                  <p className="text-sm font-medium text-navy-800 truncate">{m.title}</p>
+                  <p className="text-[11px] text-navy-400 mt-0.5">
+                    {formatShortDate(m.endedAt || m.updatedAt || m.createdAt)}
+                    {m.scenarioLabel ? ` · ${m.scenarioLabel}` : ""}
+                  </p>
+                </div>
+                <button
+                  type="button"
+                  onClick={() => go("post", m.id)}
+                  className="shrink-0 inline-flex items-center gap-1 text-[11px] font-medium text-mint-700 border border-mint-100 bg-mint-50/60 px-2.5 py-1.5 rounded-lg hover:bg-mint-50 transition-colors"
+                >
+                  <Sparkles className="h-3 w-3" strokeWidth={2} />
+                  AI 總結
+                </button>
+                <div
+                  className="relative shrink-0"
+                  ref={menuOpen ? menuRef : undefined}
+                >
+                  <button
+                    type="button"
+                    aria-haspopup="menu"
+                    aria-expanded={menuOpen}
+                    aria-label="更多操作"
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      setMenuOpenId((id) => (id === m.id ? null : m.id));
+                    }}
+                    className="inline-flex items-center justify-center p-2 rounded-lg text-navy-500 opacity-30 transition-all duration-200 hover:opacity-100 hover:bg-slate-100 dark:text-slate-300 dark:opacity-40 dark:hover:opacity-100 dark:hover:bg-slate-800"
+                  >
+                    <MoreVertical className="h-4 w-4" strokeWidth={2} />
+                  </button>
+                  {menuOpen && (
+                    <div
+                      role="menu"
+                      className={`absolute right-0 z-[100] min-w-[156px] py-1 ${CARD} shadow-card-hover ${
+                        openUpward ? "bottom-full mb-1" : "top-full mt-1"
+                      }`}
+                    >
+                      <button
+                        type="button"
+                        role="menuitem"
+                        onClick={() => requestDelete(m)}
+                        className="w-full flex items-center gap-2 text-left px-3.5 py-2.5 text-sm font-medium text-red-500 hover:bg-red-50 transition-colors dark:text-red-400 dark:hover:bg-red-950/35"
+                      >
+                        <Trash2 className="h-3.5 w-3.5" strokeWidth={1.8} />
+                        刪除紀錄
+                      </button>
+                    </div>
+                  )}
+                </div>
+              </div>
+            </div>
+          );
+        })}
       </div>
+
+      {confirmTarget && (
+        <DeleteConfirmModal
+          busy={deleting}
+          title="刪除會議紀錄"
+          description={`確定要刪除「${confirmTarget.title || "未命名會議"}」的歷史紀錄嗎？相關的 AI 總結將一併移除。`}
+          onCancel={() => !deleting && setConfirmTarget(null)}
+          onConfirm={confirmDelete}
+        />
+      )}
     </section>
   );
 }
@@ -576,10 +725,28 @@ function MobileMiniTodos({ items, completingKeys, collapsingKeys, onToggle, go }
 }
 
 /** 統一 h-10、中線對齊；寬度吃滿右側欄，與下方卡片右緣切齊 */
-function JoinAndCreate({ go, onJoined }) {
+function JoinAndCreate({ go, onJoined, onInstant, instantBusy = false, isDark = false }) {
   const [code, setCode] = useState("");
   const [busy, setBusy] = useState(false);
   const [err, setErr] = useState("");
+  const [menuOpen, setMenuOpen] = useState(false);
+  const menuRef = useRef(null);
+
+  useEffect(() => {
+    if (!menuOpen) return undefined;
+    const onPointerDown = (e) => {
+      if (menuRef.current && !menuRef.current.contains(e.target)) setMenuOpen(false);
+    };
+    const onKey = (e) => {
+      if (e.key === "Escape") setMenuOpen(false);
+    };
+    document.addEventListener("pointerdown", onPointerDown);
+    document.addEventListener("keydown", onKey);
+    return () => {
+      document.removeEventListener("pointerdown", onPointerDown);
+      document.removeEventListener("keydown", onKey);
+    };
+  }, [menuOpen]);
 
   const submit = async (e) => {
     e?.preventDefault?.();
@@ -623,19 +790,81 @@ function JoinAndCreate({ go, onJoined }) {
         <button
           type="submit"
           disabled={busy || !code.trim()}
-          className={`shrink-0 ${CTRL} px-3 font-medium text-navy-600 hover:border-navy-800/15 disabled:opacity-40 disabled:cursor-not-allowed`}
+          className={`shrink-0 ${CTRL} px-3.5 font-medium text-navy-600 hover:border-navy-800/15 disabled:opacity-40 disabled:cursor-not-allowed`}
         >
           {busy ? "…" : "加入"}
         </button>
-        <button
-          type="button"
-          onClick={() => go("create")}
-          className={`shrink-0 ${CTRL} px-3 inline-flex items-center justify-center gap-1 font-semibold text-navy-800 hover:border-navy-800/15 active:scale-[0.98]`}
-        >
-          <Plus className="h-4 w-4" strokeWidth={2.2} />
-          <span className="hidden xl:inline">發起會議</span>
-          <span className="xl:hidden">發起</span>
-        </button>
+
+        {/* ⚡ 即時會議（主）＋ 規劃會議（選單）— 與左側輸入／加入同高 h-10 */}
+        <div className="relative shrink-0 flex items-center" ref={menuRef}>
+          <div className="flex h-10 items-stretch">
+            <button
+              type="button"
+              disabled={instantBusy}
+              onClick={() => onInstant?.()}
+              title="建立會議並進入大廳準備"
+              className={`h-10 box-border px-3.5 rounded-l-xl inline-flex items-center justify-center text-sm font-medium transition-all active:scale-[0.98] disabled:opacity-60 disabled:cursor-wait ${instantBtnCls(
+                isDark
+              )}`}
+            >
+              <span className="hidden xl:inline leading-none">
+                {instantBusy ? "開啟中…" : "即時會議"}
+              </span>
+              <span className="xl:hidden leading-none">{instantBusy ? "…" : "即時"}</span>
+            </button>
+            <button
+              type="button"
+              aria-haspopup="menu"
+              aria-expanded={menuOpen}
+              aria-label="更多發起方式"
+              onClick={() => setMenuOpen((v) => !v)}
+              className={`h-10 box-border px-2 rounded-r-xl inline-flex items-center justify-center border-l transition-all active:scale-[0.98] ${instantBtnCls(
+                isDark
+              )} ${isDark ? "border-l-emerald-500/30" : "border-l-white/25"}`}
+            >
+              <ChevronDown className="h-4 w-4 shrink-0" strokeWidth={2.2} />
+            </button>
+          </div>
+
+          {menuOpen && (
+            <div role="menu" className={`absolute right-0 top-full mt-1.5 z-30 w-64 p-1.5 ${CARD}`}>
+              <button
+                type="button"
+                role="menuitem"
+                disabled={instantBusy}
+                onClick={() => {
+                  setMenuOpen(false);
+                  onInstant?.();
+                }}
+                className="w-full text-left px-3 py-2.5 rounded-xl hover:bg-mint-50 transition-colors disabled:opacity-60"
+              >
+                <span className="block text-sm font-semibold text-navy-800">即時會議</span>
+                <span className="block text-[11px] text-navy-400 leading-snug">
+                  自動建立代碼，先到大廳調整裝置
+                </span>
+              </button>
+              <button
+                type="button"
+                role="menuitem"
+                onClick={() => {
+                  setMenuOpen(false);
+                  go("create");
+                }}
+                className="w-full flex items-start gap-2.5 text-left px-3 py-2.5 rounded-xl hover:bg-gray-50 transition-colors"
+              >
+                <span className="shrink-0 mt-0.5 h-7 w-7 rounded-lg bg-gray-100 text-navy-500 flex items-center justify-center">
+                  <ClipboardList className="h-3.5 w-3.5" strokeWidth={2} />
+                </span>
+                <span className="min-w-0">
+                  <span className="block text-sm font-bold text-navy-800">規劃會議</span>
+                  <span className="block text-[11px] text-navy-400 leading-snug">
+                    走三步驟檢核，設定目標與痛點
+                  </span>
+                </span>
+              </button>
+            </div>
+          )}
+        </div>
       </form>
       {err ? <p className="mt-1.5 text-[11px] text-coral-500 leading-none">{err}</p> : null}
     </div>
@@ -643,12 +872,67 @@ function JoinAndCreate({ go, onJoined }) {
 }
 
 export default function Dashboard({ store, go, me, mode = "enterprise" }) {
-  const { meetings, deleteMeeting, updateMeeting, refreshMeetings, loading, error, setMeetings } = store;
+  const { meetings, createMeeting, deleteMeeting, updateMeeting, refreshMeetings, loading, error, setMeetings } = store;
   const modeInfo = getMode(mode);
   const { resolved: themeResolved } = useTheme();
   const isDark = themeResolved === "dark";
   const [completingKeys, setCompletingKeys] = useState(() => new Set());
   const [collapsingKeys, setCollapsingKeys] = useState(() => new Set());
+  const [instantBusy, setInstantBusy] = useState(false);
+  const [instantError, setInstantError] = useState("");
+  const [preJoinTarget, setPreJoinTarget] = useState(null);
+
+  /** 點即時會議：先問是否加入，確認後才建立並進大廳 */
+  const requestInstantMeeting = () => {
+    if (instantBusy) return;
+    setInstantError("");
+    const now = new Date().toLocaleTimeString("en-US", {
+      hour: "numeric",
+      minute: "2-digit",
+      hour12: true,
+    });
+    setPreJoinTarget({
+      instant: true,
+      title: `即時討論會議 - ${now}`,
+    });
+  };
+
+  /**
+   * 確認後建立即時會議（含 6 碼）→ 進入大廳準備頁。
+   * 不經 CreateMeeting 三步驟；使用者在 GreenRoom 確認裝置後才進 LiveRoom。
+   */
+  const startInstantMeeting = async (title) => {
+    if (instantBusy || typeof createMeeting !== "function") return;
+    setInstantBusy(true);
+    setInstantError("");
+    try {
+      const meeting = await createMeeting({
+        title:
+          title ||
+          `即時討論會議 - ${new Date().toLocaleTimeString("en-US", {
+            hour: "numeric",
+            minute: "2-digit",
+            hour12: true,
+          })}`,
+        scenario: "instant",
+        scenarioLabel: "即時會議",
+        scenarioEmoji: "",
+        goals: ["即時討論"],
+        durationMin: 45,
+        extra: { _mode: mode, scene: "日常商務", instant: true },
+      });
+      if (meeting?.id) {
+        setPreJoinTarget(null);
+        go("prejoin", meeting.id);
+      } else {
+        setInstantError("建立成功但無法取得會議 ID，請重新整理後再試");
+      }
+    } catch (e) {
+      setInstantError(e?.message || "無法開啟即時會議，請確認後端已啟動");
+    } finally {
+      setInstantBusy(false);
+    }
+  };
 
   useEffect(() => {
     refreshMeetings();
@@ -661,7 +945,6 @@ export default function Dashboard({ store, go, me, mode = "enterprise" }) {
       return "";
     }
   });
-  const [preJoinTarget, setPreJoinTarget] = useState(null);
 
   useEffect(() => {
     if (!kickToast) return undefined;
@@ -684,20 +967,33 @@ export default function Dashboard({ store, go, me, mode = "enterprise" }) {
     setPreJoinTarget(meeting);
   };
 
-  const confirmGoPrepare = () => {
-    if (!preJoinTarget?.id) return;
+  const confirmGoPrepare = (editedTitle) => {
+    if (!preJoinTarget) return;
+    if (preJoinTarget.instant) {
+      const fallback =
+        preJoinTarget.title ||
+        `即時討論會議 - ${new Date().toLocaleTimeString("en-US", {
+          hour: "numeric",
+          minute: "2-digit",
+          hour12: true,
+        })}`;
+      const title = String(editedTitle || "").trim() || fallback;
+      void startInstantMeeting(title);
+      return;
+    }
+    if (!preJoinTarget.id) return;
     const id = preJoinTarget.id;
     setPreJoinTarget(null);
     go("prejoin", id);
   };
 
   const upcoming = useMemo(
-    () => meetings.filter((m) => m.status !== "done"),
+    () => meetings.filter((m) => !isMeetingEnded(m)),
     [meetings]
   );
   const recentDone = useMemo(() => {
     return meetings
-      .filter((m) => m.status === "done")
+      .filter((m) => isMeetingEnded(m))
       .slice()
       .sort(
         (a, b) =>
@@ -722,7 +1018,7 @@ export default function Dashboard({ store, go, me, mode = "enterprise" }) {
     return list.slice(0, 5);
   }, [meetings]);
 
-  const liveCount = upcoming.filter((m) => m.status === "live").length;
+  const liveCount = upcoming.filter((m) => isMeetingLive(m)).length;
 
   const persistToggleDone = (meetingId, aid) => {
     updateMeeting(meetingId, (m) => ({
@@ -823,8 +1119,20 @@ export default function Dashboard({ store, go, me, mode = "enterprise" }) {
 
             {/* 手機：輸入代碼加入會議（桌機版在右欄） */}
             <div className="lg:hidden">
-              <JoinAndCreate go={go} onJoined={handleJoined} />
+              <JoinAndCreate
+                go={go}
+                onJoined={handleJoined}
+                onInstant={requestInstantMeeting}
+                instantBusy={instantBusy}
+                isDark={isDark}
+              />
             </div>
+
+            {instantError ? (
+              <p className="text-sm text-coral-500 bg-coral-50 border border-coral-100 rounded-xl px-3 py-2">
+                {instantError}
+              </p>
+            ) : null}
 
             <section>
               <div className="flex items-center justify-between mb-3 px-0.5">
@@ -835,7 +1143,12 @@ export default function Dashboard({ store, go, me, mode = "enterprise" }) {
               </div>
 
               {upcoming.length === 0 ? (
-                <EmptyMeetings go={go} onJoined={handleJoined} />
+                <EmptyMeetings
+                  go={go}
+                  onInstant={requestInstantMeeting}
+                  instantBusy={instantBusy}
+                  isDark={isDark}
+                />
               ) : (
                 <>
                   {/* 手機：橫向卡片滑動流 */}
@@ -886,14 +1199,20 @@ export default function Dashboard({ store, go, me, mode = "enterprise" }) {
 
             {/* 手機隱藏最近回顧 */}
             <div className="hidden lg:block">
-              <RecentRecap items={recentDone} go={go} />
+              <RecentRecap items={recentDone} go={go} onDelete={deleteMeeting} />
             </div>
           </div>
 
           {/* 右欄：僅桌機顯示（加入列 + 今日待辦） */}
           <aside className="hidden lg:block lg:col-span-1 w-full min-w-0">
             <div className="flex w-full flex-col gap-4 lg:sticky lg:top-24">
-              <JoinAndCreate go={go} onJoined={handleJoined} />
+              <JoinAndCreate
+                go={go}
+                onJoined={handleJoined}
+                onInstant={requestInstantMeeting}
+                instantBusy={instantBusy}
+                isDark={isDark}
+              />
               <TodayTodos
                 items={todayTodos}
                 completingKeys={completingKeys}
@@ -908,8 +1227,13 @@ export default function Dashboard({ store, go, me, mode = "enterprise" }) {
 
       <PreJoinConfirmModal
         open={Boolean(preJoinTarget)}
+        variant={preJoinTarget?.instant ? "instant" : "join"}
         meetingTitle={preJoinTarget?.title || "會議"}
-        onCancel={() => setPreJoinTarget(null)}
+        busy={instantBusy}
+        onCancel={() => {
+          if (instantBusy) return;
+          setPreJoinTarget(null);
+        }}
         onConfirm={confirmGoPrepare}
       />
     </div>

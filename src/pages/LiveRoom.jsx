@@ -4,34 +4,46 @@ import {
   ChevronLeft,
   ChevronRight,
   Lock,
+  Maximize2,
   Mic,
   MicOff,
   MonitorUp,
+  Search,
   ShieldCheck,
   Users,
   Video,
   VideoOff,
+  X,
 } from "lucide-react";
 import Avatar from "../components/Avatar.jsx";
 import PainPointsList from "../components/PainPointsList.jsx";
 import MeetingHeader from "../components/MeetingHeader.jsx";
 import InviteModal from "../components/InviteModal.jsx";
 import AgendaTimerCard from "../components/AgendaTimerCard.jsx";
+import AgendaTabs, {
+  AgendaEditModal,
+  DeleteAgendaConfirmModal,
+} from "../components/AgendaTabs.jsx";
 import LeftVideoSidebar from "../components/LeftVideoSidebar.jsx";
 import ParticipantItemMenu from "../components/ParticipantItemMenu.jsx";
 import MeetingNotesContainer, {
   loadCornell,
   saveCornell,
 } from "../components/MeetingNotesContainer.jsx";
-import {
-  appendAiBlockToNotes,
-  patchAiBlockInNotes,
-} from "../components/MeetingNotesEditor.jsx";
 import FloatingAIAssistantButton from "../components/FloatingAIAssistantButton.jsx";
 import MeetingNotesWithBottomAIPanel from "../components/MeetingNotesWithBottomAIPanel.jsx";
 import { useMode } from "../lib/settings.js";
 import { extractReview } from "../lib/extract.js";
 import { formatTranscriptForAi } from "../lib/meetingsCache.js";
+import {
+  clearLiveTranscript,
+  hydrateLiveTranscript,
+  saveLiveTranscript,
+} from "../lib/liveTranscriptCache.js";
+import {
+  clearActiveLiveMeetingId,
+  setActiveLiveMeetingId,
+} from "../lib/activeMeeting.js";
 import { flattenNotesDoc } from "../lib/notesDocument.js";
 import { connectSocket } from "../lib/socket.js";
 import { inviteToMeeting } from "../lib/api.js";
@@ -73,6 +85,38 @@ const paletteFor = (name) => {
   for (const ch of name || "") h = (h + ch.charCodeAt(0)) % TYPING_PALETTE.length;
   return TYPING_PALETTE[h];
 };
+
+const DEFAULT_AGENDA_MINUTES = 15;
+
+function normalizeAgendaNames(goals) {
+  const list = (Array.isArray(goals) ? goals : [])
+    .map((g) => String(g || "").trim())
+    .filter(Boolean);
+  return list.length ? list : ["會議討論"];
+}
+
+function normalizeAgendaMinutes(goals, minutes, durationMin) {
+  const names = normalizeAgendaNames(goals);
+  const raw = Array.isArray(minutes) ? minutes : [];
+  const fallback = Math.max(
+    1,
+    Math.round((Number(durationMin) || names.length * DEFAULT_AGENDA_MINUTES) / Math.max(1, names.length))
+  );
+  return names.map((_, i) => {
+    const n = Number(raw[i]);
+    return Number.isFinite(n) && n >= 1 ? Math.min(480, Math.round(n)) : fallback;
+  });
+}
+
+function uniqueAgendaName(name, list, skipIdx = -1) {
+  const base = String(name || "").trim() || "新議程";
+  let candidate = base;
+  let n = 2;
+  while (list.some((g, i) => i !== skipIdx && g === candidate)) {
+    candidate = `${base} (${n++})`;
+  }
+  return candidate;
+}
 
 const avatarColor = (name) => {
   const colors = ["bg-mint-500", "bg-coral-400", "bg-navy-600", "bg-sky-400"];
@@ -763,7 +807,7 @@ function HostPermissionMatrix({
             <p className="text-sm font-bold text-navy-800 flex items-center gap-1.5">
               <span aria-hidden></span> 結束會議權限配置
             </p>
-            <p className="text-[11px] text-navy-400 mt-0.5 mb-2">決定誰能按下「結束會議 → AI 整理」</p>
+            <p className="text-[11px] text-navy-400 mt-0.5 mb-2">決定誰能按下「結束會議」</p>
             <div className="space-y-1.5">
               {END_RULES.map((opt) => (
                 <label
@@ -829,23 +873,31 @@ function HostPermissionMatrix({
  */
 export default function LiveRoom({ meeting, store, go, social, me, onAgendaChange, initialMediaSettings = null }) {
   const [mode] = useMode();
-  const total = meeting.durationMin * 60;
-  const agenda = useMemo(
-    () => (meeting.goals?.length ? meeting.goals : ["會議討論"]),
-    [meeting.goals]
+  const [agenda, setAgenda] = useState(() => normalizeAgendaNames(meeting?.goals));
+  const [agendaMinutes, setAgendaMinutes] = useState(() =>
+    normalizeAgendaMinutes(meeting?.goals, meeting?.agendaMinutes, meeting?.durationMin)
   );
-
+  const [agendaIdx, setAgendaIdx] = useState(0);
   const [sec, setSec] = useState(() => {
-    if (meeting.startedAt) return Math.max(0, total - Math.floor((Date.now() - meeting.startedAt) / 1000));
-    return total;
+    const mins = normalizeAgendaMinutes(
+      meeting?.goals,
+      meeting?.agendaMinutes,
+      meeting?.durationMin
+    );
+    return Math.max(1, mins[0] || DEFAULT_AGENDA_MINUTES) * 60;
   });
   const [timerPaused, setTimerPaused] = useState(false);
-  const [agendaIdx, setAgendaIdx] = useState(0);
   const [peerCount, setPeerCount] = useState(1);
   const [inviting, setInviting] = useState(false);
   const [roster, setRoster] = useState(() => dedupeRoster(buildSeedRoster(meeting)));
   const inviteBootstrappedRef = useRef(null); // meeting.id once invite pipeline started
   const redirectedRef = useRef(false);
+  const [agendaEditOpen, setAgendaEditOpen] = useState(false);
+  const [agendaEditMode, setAgendaEditMode] = useState("add"); // add | rename
+  const [agendaEditIdx, setAgendaEditIdx] = useState(-1);
+  const [agendaDeleteIdx, setAgendaDeleteIdx] = useState(null);
+  const [agendaBusy, setAgendaBusy] = useState(false);
+  const [agendaToast, setAgendaToast] = useState("");
 
   /** 真房東：僅會議發起人（ownerId）才是，與測試角色切換脫鉤 */
   const isTrueHost = Boolean(me?.id && meeting?.ownerId && me.id === meeting.ownerId);
@@ -955,11 +1007,17 @@ export default function LiveRoom({ meeting, store, go, social, me, onAgendaChang
   const [rosterModalOpen, setRosterModalOpen] = useState(false);
   /** 手機：超長會議名稱點擊展開 */
   const [titleModalOpen, setTitleModalOpen] = useState(false);
+  /** 放大檢視完整逐字稿 */
+  const [transcriptModalOpen, setTranscriptModalOpen] = useState(false);
+  const [transcriptSearch, setTranscriptSearch] = useState("");
 
   /** 即時語音轉文字逐字稿（本機 Web Speech 真實收音） */
   const [transcript, setTranscript] = useState(() =>
-    Array.isArray(meeting?.transcript) ? meeting.transcript : []
+    hydrateLiveTranscript(meeting?.id, meeting?.transcript)
   );
+  const transcriptPersistTimer = useRef(null);
+  const transcriptRef = useRef(transcript);
+  transcriptRef.current = transcript;
 
   const [topicNotes, setTopicNotes] = useState(() => {
     if (meeting.topicNotes && Object.keys(meeting.topicNotes).length) return meeting.topicNotes;
@@ -977,8 +1035,10 @@ export default function LiveRoom({ meeting, store, go, social, me, onAgendaChang
   const typingPeers = useRef(new Map());
   const transcriptEndRef = useRef(null);
   const transcriptScrollRef = useRef(null);
-  /** 靜音 AI 串流寫入錨點（共用筆記） */
-  const aiSharedAnchorRef = useRef({ topic: "", aiId: "", question: "" });
+  /** 僅在接近底部時自動捲動，避免使用者上翻歷史時被 interim 拉回 */
+  const transcriptStickBottomRef = useRef(true);
+  const transcriptModalScrollRef = useRef(null);
+  const transcriptModalStickBottomRef = useRef(true);
   const topic = agenda[agendaIdx];
 
   const hostName = useMemo(() => resolveHostName(meeting, me), [meeting, me]);
@@ -992,13 +1052,80 @@ export default function LiveRoom({ meeting, store, go, social, me, onAgendaChang
     return () => mq.removeEventListener("change", apply);
   }, []);
 
-  const appendTranscript = useCallback((row) => {
-    if (!row?.text) return;
+  const persistTranscriptNow = useCallback(
+    async (rows) => {
+      const list = Array.isArray(rows) ? rows : transcriptRef.current;
+      saveLiveTranscript(meeting.id, list);
+      // 樂觀寫入本地 store，即使 API 權限不足，回到會議仍可從 meetings + session 還原
+      try {
+        await store.updateMeeting(meeting.id, {
+          transcript: list,
+          transcriptText: formatTranscriptForAi(list),
+        });
+      } catch {
+        /* 本機快取已寫入；略過伺服器寫入失敗 */
+      }
+    },
+    [meeting.id, store]
+  );
+
+  const appendTranscript = useCallback(
+    (row) => {
+      if (!row?.text) return;
+      setTranscript((prev) => {
+        let base = prev;
+        const upgradeFrom = String(row.upgradeFrom || "").trim();
+        if (upgradeFrom && prev.length) {
+          const last = prev[prev.length - 1];
+          const lastText = String(last?.text || "").trim();
+          const nextText = String(row.text || "").trim();
+          // 僅升級「同一句」：完全相同、或 final 延續 interim，避免誤刪上一句完整對話
+          const sameUtterance =
+            lastText === upgradeFrom &&
+            (nextText === lastText ||
+              nextText.startsWith(lastText) ||
+              lastText.startsWith(nextText));
+          if (sameUtterance) {
+            base = prev.slice(0, -1);
+          }
+        }
+        const clean = {
+          id: row.id,
+          time: row.time,
+          at: row.at,
+          speaker: row.speaker,
+          text: row.text,
+        };
+        const next = [...base, clean];
+        // 整場會議完整保留；僅在極端長度時裁舊句以防記憶體暴衝
+        const clipped = next.length > 10_000 ? next.slice(-10_000) : next;
+        saveLiveTranscript(meeting.id, clipped);
+        clearTimeout(transcriptPersistTimer.current);
+        transcriptPersistTimer.current = setTimeout(() => {
+          void persistTranscriptNow(clipped);
+        }, 900);
+        return clipped;
+      });
+    },
+    [meeting.id, persistTranscriptNow]
+  );
+
+  // 會議物件晚到／伺服器帶回較長逐字稿時合併，不覆蓋本機較完整版本
+  const serverTranscriptSig = useMemo(() => {
+    const rows = Array.isArray(meeting?.transcript) ? meeting.transcript : [];
+    if (!rows.length) return "0";
+    const last = rows[rows.length - 1] || {};
+    return `${rows.length}:${last.id || ""}:${last.at || ""}`;
+  }, [meeting?.transcript]);
+
+  useEffect(() => {
+    const fromMeeting = Array.isArray(meeting?.transcript) ? meeting.transcript : [];
+    if (!fromMeeting.length) return;
     setTranscript((prev) => {
-      const next = [...prev, row];
-      return next.length > 200 ? next.slice(-200) : next;
+      if (fromMeeting.length <= prev.length) return prev;
+      return hydrateLiveTranscript(meeting.id, [...prev, ...fromMeeting]);
     });
-  }, []);
+  }, [meeting.id, serverTranscriptSig]); // eslint-disable-line react-hooks/exhaustive-deps -- sig tracks server transcript
 
   const {
     micOn,
@@ -1112,8 +1239,9 @@ export default function LiveRoom({ meeting, store, go, social, me, onAgendaChang
     return [meRow, ...others].slice(0, 8);
   }, [roster, memberNames, currentUserName, me?.id]);
 
-  /** 逐字稿自動滾到底部（含即時 interim） */
+  /** 逐字稿自動滾到底部（含即時 interim；使用者上翻時不強制拉回） */
   useEffect(() => {
+    if (!transcriptStickBottomRef.current) return;
     const el = transcriptScrollRef.current;
     if (el) {
       el.scrollTo({ top: el.scrollHeight, behavior: "smooth" });
@@ -1121,6 +1249,32 @@ export default function LiveRoom({ meeting, store, go, social, me, onAgendaChang
       transcriptEndRef.current?.scrollIntoView({ behavior: "smooth", block: "end" });
     }
   }, [transcript, interimText]);
+
+  useEffect(() => {
+    if (!transcriptModalOpen || !transcriptModalStickBottomRef.current) return;
+    if (String(transcriptSearch || "").trim()) return;
+    const el = transcriptModalScrollRef.current;
+    if (el) {
+      el.scrollTo({ top: el.scrollHeight, behavior: "smooth" });
+    }
+  }, [transcript, interimText, transcriptModalOpen, transcriptSearch]);
+
+  useEffect(() => {
+    if (!transcriptModalOpen) return;
+    if (!String(transcriptSearch || "").trim()) return;
+    const el = transcriptModalScrollRef.current;
+    if (el) {
+      el.scrollTo({ top: 0, behavior: "auto" });
+      transcriptModalStickBottomRef.current = false;
+    }
+  }, [transcriptSearch, transcriptModalOpen]);
+
+  useEffect(
+    () => () => {
+      clearTimeout(transcriptPersistTimer.current);
+    },
+    []
+  );
 
   const canEdit =
     (isTrueHost && currentRole === "host") || allowedEditors.includes(currentUserName);
@@ -1220,23 +1374,26 @@ export default function LiveRoom({ meeting, store, go, social, me, onAgendaChang
     }
   }, [meeting]);
 
-  // 跨裝置強同步：任一端結束 → 全端強制進會後 AI 整理
-  useEffect(() => {
-    const ended =
-      meetingStatus === "ended" ||
-      meeting?.status === "done" ||
-      meeting?.meetingStatus === "ended";
-    if (!ended || redirectedRef.current) return;
-    redirectedRef.current = true;
-    go("post", meeting.id);
-  }, [meetingStatus, meeting?.status, meeting?.meetingStatus, meeting.id, go]);
-
   useEffect(() => {
     if (meeting.status !== "live" && meeting.status !== "done") {
       store.updateMeeting(meeting.id, { status: "live", startedAt: Date.now(), meetingStatus: "in_progress" });
     }
+    if (meeting.status !== "done" && meeting.meetingStatus !== "ended") {
+      setActiveLiveMeetingId(meeting.id);
+    }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
+
+  // 跨裝置強同步：任一端結束 → 全端強制進會後 AI 整理（須已寫入 status=done）
+  useEffect(() => {
+    const ended =
+      meeting?.status === "done" ||
+      meeting?.meetingStatus === "ended";
+    if (!ended || redirectedRef.current) return;
+    redirectedRef.current = true;
+    clearActiveLiveMeetingId(meeting.id);
+    go("post", meeting.id);
+  }, [meeting?.status, meeting?.meetingStatus, meeting.id, go]);
 
   /**
    * 自動邀請 + 模擬加入（名單強制去重；Strict Mode 不重複塞人）
@@ -1358,6 +1515,12 @@ export default function LiveRoom({ meeting, store, go, social, me, onAgendaChang
 
     const onJoined = ({ meeting: joined, peerCount: count, userName: joinedName }) => {
       if (joined?.topicNotes) setTopicNotes(joined.topicNotes);
+      if (joined?.goals) {
+        setAgenda(normalizeAgendaNames(joined.goals));
+        setAgendaMinutes(
+          normalizeAgendaMinutes(joined.goals, joined.agendaMinutes, joined.durationMin)
+        );
+      }
       setPeerCount(count || 1);
       setSyncState("joined");
       setSyncError(null);
@@ -1415,6 +1578,17 @@ export default function LiveRoom({ meeting, store, go, social, me, onAgendaChang
         setMeetingStatus("ended");
       }
       if (updated.topicNotes) setTopicNotes(updated.topicNotes);
+      if (Array.isArray(updated.goals)) {
+        const nextGoals = normalizeAgendaNames(updated.goals);
+        const nextMins = normalizeAgendaMinutes(
+          updated.goals,
+          updated.agendaMinutes,
+          updated.durationMin
+        );
+        setAgenda(nextGoals);
+        setAgendaMinutes(nextMins);
+        setAgendaIdx((idx) => Math.min(idx, Math.max(0, nextGoals.length - 1)));
+      }
       if (updated.memberReports && typeof updated.memberReports === "object") {
         setMemberReports(updated.memberReports);
       }
@@ -1525,11 +1699,189 @@ export default function LiveRoom({ meeting, store, go, social, me, onAgendaChang
   }, [meeting.id, me?.name, me?.id, markRosterJoined, go]);
 
   const selectAgenda = (i) => {
-    setAgendaIdx(i);
+    const next = Math.max(0, Math.min(i, agenda.length - 1));
+    setAgendaIdx(next);
     if (socketRef.current?.connected) {
-      socketRef.current.emit("agenda:select", { meetingId: meeting.id, agendaIdx: i });
+      socketRef.current.emit("agenda:select", { meetingId: meeting.id, agendaIdx: next });
     }
   };
+
+  const denyAgendaManage = useCallback(() => {
+    setAgendaToast("僅會議 Host 或管理員可修改議程");
+  }, []);
+
+  const persistAgendaState = useCallback(
+    async ({
+      nextAgenda,
+      nextMinutes,
+      nextNotes,
+      nextIdx = null,
+    }) => {
+      const goals = normalizeAgendaNames(nextAgenda);
+      const minutes = normalizeAgendaMinutes(goals, nextMinutes, meeting.durationMin);
+      const durationMin = Math.max(1, minutes.reduce((s, n) => s + n, 0));
+      setAgenda(goals);
+      setAgendaMinutes(minutes);
+      if (nextNotes) setTopicNotes(nextNotes);
+      if (typeof nextIdx === "number") {
+        setAgendaIdx(Math.max(0, Math.min(nextIdx, goals.length - 1)));
+      } else {
+        setAgendaIdx((idx) => Math.min(idx, Math.max(0, goals.length - 1)));
+      }
+      await store.updateMeeting(meeting.id, {
+        goals,
+        agendaMinutes: minutes,
+        durationMin,
+        ...(nextNotes ? { topicNotes: nextNotes } : {}),
+      });
+      if (nextNotes && socketRef.current?.connected) {
+        socketRef.current.emit("notes:update", {
+          meetingId: meeting.id,
+          topicNotes: nextNotes,
+        });
+      }
+    },
+    [meeting.durationMin, meeting.id, store]
+  );
+
+  const openAddAgenda = () => {
+    if (!canEdit) {
+      denyAgendaManage();
+      return;
+    }
+    setAgendaEditMode("add");
+    setAgendaEditIdx(-1);
+    setAgendaEditOpen(true);
+  };
+
+  const openRenameAgenda = (idx) => {
+    if (!canEdit) {
+      denyAgendaManage();
+      return;
+    }
+    setAgendaEditMode("rename");
+    setAgendaEditIdx(idx);
+    setAgendaEditOpen(true);
+  };
+
+  const openDeleteAgenda = (idx) => {
+    if (!canEdit) {
+      denyAgendaManage();
+      return;
+    }
+    if (agenda.length <= 1) return;
+    setAgendaDeleteIdx(idx);
+  };
+
+  const confirmAgendaEdit = async ({ name, minutes }) => {
+    if (!canEdit) {
+      denyAgendaManage();
+      return;
+    }
+    setAgendaBusy(true);
+    try {
+      if (agendaEditMode === "add") {
+        const clean = uniqueAgendaName(name, agenda);
+        const nextAgenda = [...agenda, clean];
+        const nextMinutes = [...agendaMinutes, minutes || DEFAULT_AGENDA_MINUTES];
+        const nextNotes = { ...topicNotes, [clean]: topicNotes[clean] || "" };
+        await persistAgendaState({
+          nextAgenda,
+          nextMinutes,
+          nextNotes,
+          nextIdx: nextAgenda.length - 1,
+        });
+        if (socketRef.current?.connected) {
+          socketRef.current.emit("agenda:select", {
+            meetingId: meeting.id,
+            agendaIdx: nextAgenda.length - 1,
+          });
+        }
+      } else {
+        const idx = agendaEditIdx;
+        if (idx < 0 || idx >= agenda.length) return;
+        const oldName = agenda[idx];
+        const clean = uniqueAgendaName(name, agenda, idx);
+        const nextAgenda = agenda.map((g, i) => (i === idx ? clean : g));
+        const nextMinutes = agendaMinutes.map((m, i) =>
+          i === idx ? minutes || DEFAULT_AGENDA_MINUTES : m
+        );
+        let nextNotes = topicNotes;
+        if (oldName !== clean) {
+          nextNotes = { ...topicNotes };
+          nextNotes[clean] = nextNotes[oldName] || "";
+          delete nextNotes[oldName];
+        }
+        await persistAgendaState({
+          nextAgenda,
+          nextMinutes,
+          nextNotes,
+          nextIdx: idx,
+        });
+      }
+      setAgendaEditOpen(false);
+    } catch (e) {
+      setAgendaToast(e?.message || "議程更新失敗");
+    } finally {
+      setAgendaBusy(false);
+    }
+  };
+
+  const confirmDeleteAgenda = async () => {
+    if (!canEdit) {
+      denyAgendaManage();
+      return;
+    }
+    const idx = agendaDeleteIdx;
+    if (idx == null || idx < 0 || agenda.length <= 1) {
+      setAgendaDeleteIdx(null);
+      return;
+    }
+    setAgendaBusy(true);
+    try {
+      const removed = agenda[idx];
+      const nextAgenda = agenda.filter((_, i) => i !== idx);
+      const nextMinutes = agendaMinutes.filter((_, i) => i !== idx);
+      const nextNotes = { ...topicNotes };
+      delete nextNotes[removed];
+      // 刪除當前議程 → 跳到下一個，若無則上一個
+      let nextIdx = agendaIdx;
+      if (idx === agendaIdx) {
+        nextIdx = Math.min(idx, nextAgenda.length - 1);
+      } else if (idx < agendaIdx) {
+        nextIdx = agendaIdx - 1;
+      }
+      await persistAgendaState({
+        nextAgenda,
+        nextMinutes,
+        nextNotes,
+        nextIdx,
+      });
+      if (socketRef.current?.connected) {
+        socketRef.current.emit("agenda:select", {
+          meetingId: meeting.id,
+          agendaIdx: nextIdx,
+        });
+      }
+      setAgendaDeleteIdx(null);
+    } catch (e) {
+      setAgendaToast(e?.message || "刪除議程失敗");
+    } finally {
+      setAgendaBusy(false);
+    }
+  };
+
+  /** 切換／變更當前議程時間預算時，重置 Time Boxing 倒數 */
+  const currentAgendaBudget = agendaMinutes[agendaIdx] || DEFAULT_AGENDA_MINUTES;
+  useEffect(() => {
+    setSec(Math.max(1, currentAgendaBudget) * 60);
+  }, [agendaIdx, currentAgendaBudget]);
+
+  useEffect(() => {
+    if (!agendaToast) return undefined;
+    const t = window.setTimeout(() => setAgendaToast(""), 3200);
+    return () => window.clearTimeout(t);
+  }, [agendaToast]);
 
   const updateHostAssign = (v) => {
     setIsHostAssignmentEnabled(v);
@@ -1804,23 +2156,51 @@ export default function LiveRoom({ meeting, store, go, social, me, onAgendaChang
   const endMeeting = async () => {
     if (!canEndMeeting || meetingStatus === "ended" || endingMeeting) return;
     setEndingMeeting(true);
+    redirectedRef.current = true; // 避免結束流程與跳轉 effect 競態
     clearTimeout(notesTimer.current);
+    clearTimeout(transcriptPersistTimer.current);
+
     const participantNames = memberNames.length
       ? memberNames
       : meeting.participants || [];
-    const transcriptText = formatTranscriptForAi(transcript);
+    const rows = transcriptRef.current.slice();
+    const transcriptText = formatTranscriptForAi(rows);
     const review = extractReview(buildForReview(), participantNames);
+    const endedAt = Date.now();
+
+    // 1) 先強制結案狀態（看板／PIP 立刻離開「進行中」）
+    try {
+      await store.updateMeeting(meeting.id, {
+        status: "done",
+        meetingStatus: "ended",
+        endedAt,
+      });
+    } catch (err) {
+      console.warn("[LiveRoom] end status patch failed, keeping local done", err?.message || err);
+      if (typeof store.setMeetings === "function") {
+        store.setMeetings((prev) =>
+          (Array.isArray(prev) ? prev : []).map((m) =>
+            m.id === meeting.id
+              ? { ...m, status: "done", meetingStatus: "ended", endedAt }
+              : m
+          )
+        );
+      }
+    }
     setMeetingStatus("ended");
+    clearActiveLiveMeetingId(meeting.id);
+
+    // 2) 再寫入筆記／逐字稿／AI 整理（失敗不回滾結案）
     try {
       await store.updateMeeting(meeting.id, {
         topicNotes,
         notes: buildDisplay(),
-        transcript: transcript.slice(),
+        transcript: rows,
         transcriptText,
         aiSource: transcriptText.trim() ? "transcript" : "notes",
         status: "done",
         meetingStatus: "ended",
-        endedAt: Date.now(),
+        endedAt,
         review,
         actions: review.actions,
         participants: participantNames,
@@ -1844,24 +2224,35 @@ export default function LiveRoom({ meeting, store, go, social, me, onAgendaChang
       if (socketRef.current?.connected) {
         socketRef.current.emit("meeting:patch", {
           meetingId: meeting.id,
-          patch: { status: "done", meetingStatus: "ended" },
+          patch: { status: "done", meetingStatus: "ended", endedAt },
         });
       }
-      // 讓「交由 Gemini 分析」提示可見片刻，再進會後頁（MeetingSummary + meetingsCache）
-      await new Promise((r) => window.setTimeout(r, 1100));
-      setEndConfirmOpen(false);
-      go("post", meeting.id);
     } catch (err) {
-      console.error("[LiveRoom] endMeeting", err);
-      setMeetingStatus("in_progress");
-      setEndingMeeting(false);
+      console.error("[LiveRoom] endMeeting content persist", err);
     }
+
+    clearLiveTranscript(meeting.id);
+    await new Promise((r) => window.setTimeout(r, 600));
+    setEndConfirmOpen(false);
+    go("post", meeting.id);
+    setEndingMeeting(false);
   };
 
   const saveLater = async () => {
     clearTimeout(notesTimer.current);
+    clearTimeout(transcriptPersistTimer.current);
+    const rows = transcriptRef.current;
+    saveLiveTranscript(meeting.id, rows);
     socketRef.current?.emit("notes:update", { meetingId: meeting.id, topicNotes });
-    await store.updateMeeting(meeting.id, { topicNotes });
+    try {
+      await store.updateMeeting(meeting.id, {
+        topicNotes,
+        transcript: rows,
+        transcriptText: formatTranscriptForAi(rows),
+      });
+    } catch {
+      /* 本機 store／session 已有逐字稿，仍可回到會議 */
+    }
     go("dashboard");
   };
 
@@ -1875,60 +2266,6 @@ export default function LiveRoom({ meeting, store, go, social, me, onAgendaChang
       saveCornell(cornellUserKey, meeting.id, next);
     },
     [cornellUserKey, meeting.id]
-  );
-
-  /** 語音 Ask AI → 寫入共用筆記的 Inline AI Block（全員同步） */
-  const handleAiInsertShared = useCallback(
-    (partial, meta = {}) => {
-      const t = topic;
-      const q = meta.question || "";
-      if (meta.phase === "start") {
-        setNotesTab("group");
-        setMobileTab("notes");
-        setTopicNotes((prev) => {
-          const { serialized, aiId } = appendAiBlockToNotes(prev[t] || "", {
-            question: q,
-            answer: "",
-            status: "thinking",
-          });
-          aiSharedAnchorRef.current = { topic: t, aiId, question: q };
-          return { ...prev, [t]: serialized };
-        });
-        clearTimeout(notesTimer.current);
-        notesTimer.current = setTimeout(() => {
-          setTopicNotes((latest) => {
-            socketRef.current?.emit("notes:update", {
-              meetingId: meeting.id,
-              topic: t,
-              content: latest[t] || "",
-            });
-            return latest;
-          });
-        }, 80);
-        return;
-      }
-      const anchor = aiSharedAnchorRef.current;
-      if (!anchor?.topic || !anchor?.aiId) return;
-      const status = meta.phase === "done" ? "done" : "streaming";
-      setTopicNotes((prev) => ({
-        ...prev,
-        [anchor.topic]: patchAiBlockInNotes(prev[anchor.topic] || "", anchor.aiId, {
-          status,
-          answer: String(partial || ""),
-        }),
-      }));
-      if (meta.phase === "done") {
-        clearTimeout(notesTimer.current);
-        notesTimer.current = setTimeout(() => {
-          setTopicNotes((latest) => {
-            socketRef.current?.emit("notes:update", { meetingId: meeting.id, topicNotes: latest });
-            store.updateMeeting(meeting.id, { topicNotes: latest });
-            return latest;
-          });
-        }, 400);
-      }
-    },
-    [topic, meeting.id, store]
   );
 
   const mobileTabs = [
@@ -2007,8 +2344,36 @@ export default function LiveRoom({ meeting, store, go, social, me, onAgendaChang
     />
   );
 
+  const filteredTranscript = useMemo(() => {
+    const q = String(transcriptSearch || "").trim().toLowerCase();
+    if (!q) return transcript;
+    return transcript.filter((row) => {
+      const text = String(row?.text || "").toLowerCase();
+      const speaker = String(row?.speaker || "").toLowerCase();
+      return text.includes(q) || speaker.includes(q);
+    });
+  }, [transcript, transcriptSearch]);
+
+  const onTranscriptScroll = useCallback((e) => {
+    const el = e.currentTarget;
+    const dist = el.scrollHeight - el.scrollTop - el.clientHeight;
+    transcriptStickBottomRef.current = dist < 72;
+  }, []);
+
+  const onTranscriptModalScroll = useCallback((e) => {
+    const el = e.currentTarget;
+    const dist = el.scrollHeight - el.scrollTop - el.clientHeight;
+    transcriptModalStickBottomRef.current = dist < 96;
+  }, []);
+
+  const openTranscriptModal = useCallback(() => {
+    transcriptModalStickBottomRef.current = true;
+    setTranscriptSearch("");
+    setTranscriptModalOpen(true);
+  }, []);
+
   const transcriptWall = (
-    <div className="flex flex-col min-h-0 h-full bg-white border border-navy-800/8 rounded-3xl shadow-card overflow-hidden">
+    <div className="flex flex-col min-h-0 h-full max-h-full bg-white border border-navy-800/8 rounded-3xl shadow-card overflow-hidden">
       <div className="flex items-center justify-between gap-2 px-4 py-3 border-b border-navy-800/6 shrink-0">
         <div className="min-w-0">
           <p className="text-sm font-bold text-navy-800">即時語音轉文字</p>
@@ -2022,19 +2387,31 @@ export default function LiveRoom({ meeting, store, go, social, me, onAgendaChang
               : "此瀏覽器不支援語音辨識（建議 Chrome）"}
           </p>
         </div>
-        <span
-          className={`shrink-0 text-[10px] font-bold px-2 py-0.5 rounded-full border ${
-            sttListening
-              ? "text-mint-700 bg-mint-50 border-mint-100"
-              : "text-navy-500 bg-navy-800/5 border-navy-800/10"
-          }`}
-        >
-          {transcript.length} 句
-        </span>
+        <div className="flex items-center gap-1.5 shrink-0">
+          <span
+            className={`text-[10px] font-bold px-2 py-0.5 rounded-full border ${
+              sttListening
+                ? "text-mint-700 bg-mint-50 border-mint-100"
+                : "text-navy-500 bg-navy-800/5 border-navy-800/10"
+            }`}
+          >
+            {transcript.length} 句
+          </span>
+          <button
+            type="button"
+            title="放大檢視逐字稿"
+            aria-label="放大檢視逐字稿"
+            onClick={openTranscriptModal}
+            className="inline-flex h-7 w-7 items-center justify-center rounded-lg border border-navy-800/10 bg-navy-800/[0.03] text-navy-500 hover:bg-mint-50 hover:text-mint-700 hover:border-mint-200 transition-colors"
+          >
+            <Maximize2 className="h-3.5 w-3.5" strokeWidth={2.4} />
+          </button>
+        </div>
       </div>
       <div
         ref={transcriptScrollRef}
-        className="flex-1 min-h-0 overflow-y-auto px-3.5 py-3 space-y-2.5 scroll-smooth"
+        onScroll={onTranscriptScroll}
+        className="flex-1 min-h-0 overflow-y-auto overscroll-contain px-3.5 py-3 space-y-2.5 scroll-smooth mf-thin-scrollbar"
       >
         {transcript.length === 0 && !interimText ? (
           <div className="h-full min-h-[160px] flex flex-col items-center justify-center text-center px-4">
@@ -2108,30 +2485,17 @@ export default function LiveRoom({ meeting, store, go, social, me, onAgendaChang
         )}
       </div>
 
-      <div className="flex gap-1 px-3 pt-2.5 md:pt-3 overflow-x-auto border-b border-navy-800/6 shrink-0">
-        {agenda.map((a, i) => (
-          <button
-            key={i}
-            type="button"
-            onClick={() => selectAgenda(i)}
-            className={`shrink-0 flex items-center gap-1.5 text-xs font-semibold px-3 py-2 rounded-t-lg transition-colors ${
-              i === agendaIdx
-                ? "bg-mint-50 text-mint-700 border-b-2 border-mint-500"
-                : "text-navy-400 hover:text-navy-700"
-            }`}
-          >
-            {i + 1}. {a.length > 10 ? a.slice(0, 10) + "…" : a}
-            {typingTopics.has(a) ? (
-              <span
-                className={`h-1.5 w-1.5 rounded-full ${typingTopics.get(a).dot} animate-pulse`}
-                title="有人正在此議程輸入"
-              />
-            ) : flattenNotesDoc(topicNotes[a] || "").trim() ? (
-              <span className="h-1.5 w-1.5 rounded-full bg-mint-400" />
-            ) : null}
-          </button>
-        ))}
-      </div>
+      <AgendaTabs
+        agenda={agenda}
+        agendaIdx={agendaIdx}
+        topicNotes={topicNotes}
+        typingTopics={typingTopics}
+        canManage={canEdit}
+        onSelect={selectAgenda}
+        onRequestAdd={openAddAgenda}
+        onRequestRename={openRenameAgenda}
+        onRequestDelete={openDeleteAgenda}
+      />
 
       {typingHere.length > 0 && (
         <div className="flex flex-wrap items-center gap-1.5 px-4 md:px-5 pt-2.5 -mb-1 shrink-0">
@@ -2188,10 +2552,11 @@ export default function LiveRoom({ meeting, store, go, social, me, onAgendaChang
             meetingStatus !== "ended" ? (
               <FloatingAIAssistantButton
                 transcriptRows={transcript}
+                liveInterim={interimText}
+                sttActive={sttListening}
                 title={meeting.title || meetingDisplayTitle}
                 topic={topic}
                 mode={mode}
-                onInsertShared={handleAiInsertShared}
               />
             ) : null
           }
@@ -2217,7 +2582,7 @@ export default function LiveRoom({ meeting, store, go, social, me, onAgendaChang
               onClick={() => setEndConfirmOpen(true)}
               className="text-xs font-semibold text-white bg-navy-800 px-3.5 py-2 rounded-xl hover:bg-navy-700 transition-colors active:scale-[0.98]"
             >
-              結束會議 → AI 整理
+              結束會議
             </button>
           ) : (
             <button
@@ -2294,6 +2659,7 @@ export default function LiveRoom({ meeting, store, go, social, me, onAgendaChang
       topic={topic}
       agendaCount={agenda.length}
       agendaIndex={agendaIdx}
+      budgetMinutes={currentAgendaBudget}
       paused={timerPaused}
       onTogglePause={() => setTimerPaused((p) => !p)}
       onNextAgenda={() => selectAgenda(Math.min(agendaIdx + 1, agenda.length - 1))}
@@ -2536,9 +2902,11 @@ export default function LiveRoom({ meeting, store, go, social, me, onAgendaChang
       </div>
 
       {/* lg 但非 xl：逐字稿＋精簡計時卡置底 */}
-      <div className="hidden lg:flex xl:hidden shrink-0 gap-3 mt-3 items-stretch">
-        <div className="flex-1 min-h-0 max-h-[22vh] overflow-hidden">{transcriptWall}</div>
-        <div className="w-64 shrink-0">{sidebarPanel}</div>
+      <div className="hidden lg:flex xl:hidden shrink-0 gap-3 mt-3 items-stretch max-h-[min(36vh,420px)]">
+        <div className="flex-1 min-h-0 h-full max-h-[min(36vh,420px)] overflow-hidden">
+          {transcriptWall}
+        </div>
+        <div className="w-64 shrink-0 overflow-y-auto mf-thin-scrollbar">{sidebarPanel}</div>
       </div>
 
       {/* 與會者完整名單毛玻璃 Modal（頭像 +N 點擊） */}
@@ -2639,6 +3007,126 @@ export default function LiveRoom({ meeting, store, go, social, me, onAgendaChang
         </div>
       )}
 
+      {transcriptModalOpen && (
+        <div
+          className="fixed inset-0 z-[100] flex items-center justify-center p-3 sm:p-6"
+          role="dialog"
+          aria-modal="true"
+          aria-labelledby="transcript-modal-title"
+        >
+          <button
+            type="button"
+            aria-label="關閉逐字稿放大檢視"
+            className="absolute inset-0 bg-black/40 backdrop-blur-sm"
+            onClick={() => setTranscriptModalOpen(false)}
+          />
+          <div className="relative z-10 flex w-full max-w-4xl h-[80vh] max-h-[min(80vh,820px)] flex-col overflow-hidden rounded-3xl border border-white/60 bg-white/95 backdrop-blur-xl shadow-card-hover ring-1 ring-navy-800/10 dark:bg-[#111c35] dark:border-slate-800 dark:ring-slate-700/40">
+            <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between shrink-0 px-4 sm:px-5 pt-4 pb-3 border-b border-navy-800/8 dark:border-slate-700/60">
+              <div className="min-w-0">
+                <h3
+                  id="transcript-modal-title"
+                  className="text-base sm:text-lg font-bold text-navy-800 dark:text-white"
+                >
+                  📜 完整會議逐字稿
+                </h3>
+                <p className="mt-0.5 text-[11px] font-semibold text-navy-400 dark:text-slate-400">
+                  共 {transcript.length} 句
+                  {sttListening ? " · 即時更新中" : ""}
+                  {transcriptSearch.trim()
+                    ? ` · 搜尋結果 ${filteredTranscript.length} 句`
+                    : ""}
+                </p>
+              </div>
+              <div className="flex items-center gap-2 shrink-0">
+                <label className="relative flex-1 sm:w-56 min-w-0">
+                  <span className="sr-only">搜尋關鍵字</span>
+                  <Search
+                    className="pointer-events-none absolute left-2.5 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-400"
+                    strokeWidth={2.2}
+                  />
+                  <input
+                    type="search"
+                    value={transcriptSearch}
+                    onChange={(e) => setTranscriptSearch(e.target.value)}
+                    placeholder="搜尋關鍵字..."
+                    className="w-full rounded-xl border border-navy-800/10 bg-navy-800/[0.03] pl-8 pr-3 py-2 text-sm text-navy-800 placeholder:text-navy-400 outline-none focus:border-mint-300 focus:ring-2 focus:ring-mint-100 dark:bg-slate-900/60 dark:border-slate-700 dark:text-slate-100 dark:placeholder:text-slate-500 dark:focus:border-mint-500/40 dark:focus:ring-mint-500/10"
+                  />
+                </label>
+                <button
+                  type="button"
+                  aria-label="關閉"
+                  title="關閉"
+                  onClick={() => setTranscriptModalOpen(false)}
+                  className="inline-flex h-9 w-9 items-center justify-center rounded-full bg-navy-800/5 text-navy-500 hover:bg-navy-800/10 dark:bg-slate-800 dark:text-slate-300 dark:hover:bg-slate-700"
+                >
+                  <X className="h-4 w-4" strokeWidth={2.4} />
+                </button>
+              </div>
+            </div>
+
+            <div
+              ref={transcriptModalScrollRef}
+              onScroll={onTranscriptModalScroll}
+              className="flex-1 min-h-0 overflow-y-auto overscroll-contain px-4 sm:px-5 py-4 space-y-3 mf-thin-scrollbar"
+            >
+              {filteredTranscript.length === 0 && !interimText ? (
+                <div className="h-full min-h-[200px] flex flex-col items-center justify-center text-center px-4">
+                  <p className="text-sm font-bold text-navy-600 dark:text-slate-200">
+                    {transcriptSearch.trim() ? "找不到符合的逐字稿" : "尚無逐字稿"}
+                  </p>
+                  <p className="mt-1 text-xs text-navy-400 dark:text-slate-500">
+                    {transcriptSearch.trim()
+                      ? "試試其他關鍵字，或清空搜尋後瀏覽全場對話"
+                      : "對麥克風說話後，完整對話會即時出現在此"}
+                  </p>
+                </div>
+              ) : (
+                <>
+                  {filteredTranscript.map((row) => {
+                    const pal = paletteFor(row.speaker);
+                    return (
+                      <div
+                        key={row.id}
+                        className={`rounded-2xl border px-4 py-3 ${pal.bg} border-navy-800/5 dark:bg-slate-900/50 dark:border-slate-700/50`}
+                      >
+                        <div className="flex items-center gap-2.5 mb-1.5">
+                          <span className="text-xs font-bold tabular-nums text-navy-400 dark:text-slate-500">
+                            [{row.time}]
+                          </span>
+                          <span
+                            className={`text-xs font-black ${pal.text} dark:text-mint-300`}
+                          >
+                            {row.speaker}
+                          </span>
+                        </div>
+                        <p className="text-base text-navy-800 leading-relaxed dark:text-slate-100">
+                          {row.text}
+                        </p>
+                      </div>
+                    );
+                  })}
+                  {!transcriptSearch.trim() && interimText ? (
+                    <div className="rounded-2xl border border-dashed border-mint-200 bg-mint-50/60 px-4 py-3 opacity-90 dark:bg-mint-950/30 dark:border-mint-700/40">
+                      <div className="flex items-center gap-2.5 mb-1.5">
+                        <span className="text-xs font-bold text-mint-600 dark:text-mint-400">
+                          辨識中…
+                        </span>
+                        <span className="text-xs font-black text-mint-700 dark:text-mint-300">
+                          {currentUserName}
+                        </span>
+                      </div>
+                      <p className="text-base text-navy-700 leading-relaxed dark:text-slate-200">
+                        {interimText}
+                      </p>
+                    </div>
+                  ) : null}
+                </>
+              )}
+            </div>
+          </div>
+        </div>
+      )}
+
       {endConfirmOpen && (
         <div
           className="fixed inset-0 z-[100] flex items-center justify-center p-4"
@@ -2657,7 +3145,7 @@ export default function LiveRoom({ meeting, store, go, social, me, onAgendaChang
           />
           <div className="relative z-10 w-full max-w-md rounded-2xl border border-white/50 bg-white/90 backdrop-blur-md shadow-card-hover p-5 ring-1 ring-navy-800/10">
             <h3 id="end-meeting-title" className="text-base font-bold text-navy-800">
-              結束會議 → AI 整理
+              結束會議
             </h3>
             {endingMeeting ? (
               <div className="mt-3 rounded-2xl border border-mint-100 bg-mint-50/80 px-3.5 py-3">
@@ -2763,6 +3251,40 @@ export default function LiveRoom({ meeting, store, go, social, me, onAgendaChang
           {reportToast}
         </div>
       ) : null}
+
+      {agendaToast ? (
+        <div className="fixed left-1/2 top-4 z-[120] w-[min(92vw,22rem)] -translate-x-1/2 rounded-2xl border border-navy-800/10 bg-white/95 backdrop-blur-md px-4 py-3 text-center text-sm font-semibold text-navy-700 shadow-card-hover">
+          {agendaToast}
+        </div>
+      ) : null}
+
+      <AgendaEditModal
+        open={agendaEditOpen}
+        mode={agendaEditMode}
+        initialName={
+          agendaEditMode === "rename" && agendaEditIdx >= 0
+            ? agenda[agendaEditIdx] || ""
+            : ""
+        }
+        initialMinutes={
+          agendaEditMode === "rename" && agendaEditIdx >= 0
+            ? agendaMinutes[agendaEditIdx] || DEFAULT_AGENDA_MINUTES
+            : DEFAULT_AGENDA_MINUTES
+        }
+        busy={agendaBusy}
+        onClose={() => !agendaBusy && setAgendaEditOpen(false)}
+        onConfirm={confirmAgendaEdit}
+      />
+
+      <DeleteAgendaConfirmModal
+        open={agendaDeleteIdx != null}
+        agendaName={
+          agendaDeleteIdx != null ? agenda[agendaDeleteIdx] || "" : ""
+        }
+        busy={agendaBusy}
+        onClose={() => !agendaBusy && setAgendaDeleteIdx(null)}
+        onConfirm={confirmDeleteAgenda}
+      />
 
       {titleModalOpen && (
         <div
