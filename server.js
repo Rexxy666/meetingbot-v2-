@@ -6,6 +6,7 @@ import { Server } from "socket.io";
 import { authRequired, createAuthStore, socketAuth } from "./authStore.js";
 import { createMeetingsStore } from "./meetingsStore.js";
 import { createSocialStore } from "./socialStore.js";
+import { createAiQuotaStore, requireAiQuota, AI_DAILY_LIMIT } from "./aiQuotaStore.js";
 import {
   geminiConfigured,
   summarizeMeetingNotes,
@@ -85,7 +86,9 @@ async function main() {
   const authStore = await createAuthStore();
   const store = await createMeetingsStore();
   const social = await createSocialStore();
+  const aiQuota = await createAiQuotaStore();
   const requireAuth = authRequired(authStore);
+  const checkAiQuota = requireAiQuota(aiQuota);
 
   // 通知：發到某使用者的個人房間（user:<id>），其所有連線裝置都會收到
   const notify = (userId, event, payload) => io.to(`user:${userId}`).emit(event, payload);
@@ -123,7 +126,7 @@ async function main() {
         else cb(new Error(`CORS blocked: ${origin}`));
       },
       methods: ["GET", "POST", "PATCH", "DELETE", "OPTIONS"],
-      allowedHeaders: ["Content-Type", "Authorization"],
+      allowedHeaders: ["Content-Type", "Authorization", "X-Device-Id", "X-Meetflow-Device-Id"],
       credentials: false,
     })
   );
@@ -174,13 +177,30 @@ async function main() {
       auth: authStore.mode,
       meetings: await store.count(),
       gemini: geminiConfigured(),
+      aiDailyLimit: AI_DAILY_LIMIT,
+      aiQuotaStorage: aiQuota.mode,
       ts: Date.now(),
     });
   });
 
   // ── AI：會後整理（API Key 僅存後端 env）──────────────────────────────────
 
-  app.post("/api/ai/summarize", requireAuth, async (req, res) => {
+  /** 查詢今日剩餘 AI 額度（帳號 ∩ 裝置） */
+  app.get("/api/ai/quota", requireAuth, async (req, res) => {
+    try {
+      const deviceId =
+        req.headers["x-device-id"] || req.headers["x-meetflow-device-id"] || "";
+      const status = await aiQuota.getStatus({
+        userId: req.user.id,
+        deviceId,
+      });
+      res.json(status);
+    } catch (e) {
+      sendErr(res, e, "無法讀取 AI 額度");
+    }
+  });
+
+  app.post("/api/ai/summarize", requireAuth, checkAiQuota, async (req, res) => {
     try {
       const body = parseOrThrow(summarizeSchema, req.body, "AI 摘要");
       const result = await summarizeMeetingNotes({
@@ -189,7 +209,7 @@ async function main() {
         title: body.title,
         mode: body.mode,
       });
-      res.json(result);
+      res.json({ ...result, aiQuota: req.aiQuota });
     } catch (e) {
       console.error("[api/ai/summarize]", e?.message || e);
       sendErr(res, e, "AI 整理失敗");
@@ -197,11 +217,11 @@ async function main() {
   });
 
   /** 會中靜音問答：語音問題 + 近 5 分鐘脈絡 → 純文字答案（無 TTS） */
-  app.post("/api/ai/ask", requireAuth, async (req, res) => {
+  app.post("/api/ai/ask", requireAuth, checkAiQuota, async (req, res) => {
     try {
       const body = parseOrThrow(liveAskSchema, req.body, "會中 AI 問答");
       const result = await answerLiveSilentAsk(body);
-      res.json(result);
+      res.json({ ...result, aiQuota: req.aiQuota });
     } catch (e) {
       console.error("[api/ai/ask]", e?.message || e);
       sendErr(res, e, "AI 問答失敗");
@@ -209,7 +229,7 @@ async function main() {
   });
 
   /** 會中靜音問答（SSE 串流）：邊生成邊推送 chunk */
-  app.post("/api/ai/ask/stream", requireAuth, async (req, res) => {
+  app.post("/api/ai/ask/stream", requireAuth, checkAiQuota, async (req, res) => {
     let closed = false;
     const onClose = () => {
       closed = true;
@@ -261,7 +281,7 @@ async function main() {
   /* ── AI：個人化私密洞察 ────────────────────────────────────────────────────
      ⚠ 隱私：康乃爾筆記由前端隨請求送出，伺服器【不落地儲存】、
        結果只回給發話者，絕不寫入 meeting（meeting 會同步給所有 memberIds）。 */
-  app.post("/api/meetings/:id/private-insights", requireAuth, async (req, res) => {
+  app.post("/api/meetings/:id/private-insights", requireAuth, checkAiQuota, async (req, res) => {
     try {
       const id = parseOrThrow(idParamSchema, req.params.id, "會議 ID");
       const meeting = await store.getAccessible(id, req.user.id);
@@ -293,7 +313,7 @@ async function main() {
         title: meeting.title,
         mode: req.body?.mode || meeting.mode,
       });
-      res.json(result);
+      res.json({ ...result, aiQuota: req.aiQuota });
     } catch (e) {
       console.error("[api/private-insights]", e?.message || e);
       sendErr(res, e, "個人化分析失敗");
@@ -1053,6 +1073,9 @@ async function main() {
     console.log(`[meetflow-server] storage → ${store.mode} · auth → ${authStore.mode}`);
     console.log(
       `[meetflow-server] gemini → ${geminiConfigured() ? "configured" : "missing GEMINI_API_KEY (mock fallback)"}`
+    );
+    console.log(
+      `[meetflow-server] ai-quota → ${aiQuota.mode} · 每日上限 ${AI_DAILY_LIMIT}（帳號 ∩ 裝置）`
     );
   });
 }

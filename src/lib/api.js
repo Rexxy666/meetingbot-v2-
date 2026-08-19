@@ -1,4 +1,5 @@
 import { clearSession, getToken } from "./session.js";
+import { getDeviceId } from "./deviceId.js";
 
 /** 依目前開啟的網址自動推後端：localhost → localhost:3001；手機 LAN → 同 IP:3001 */
 export function resolveApiBase() {
@@ -14,16 +15,25 @@ export function resolveApiBase() {
 export const API_BASE = resolveApiBase();
 
 export class ApiError extends Error {
-  constructor(message, status = 500) {
+  constructor(message, status = 500, extra = {}) {
     super(message);
     this.name = "ApiError";
     this.status = status;
+    this.code = extra.code || null;
+    this.payload = extra.payload || null;
   }
+}
+
+function withDeviceHeaders(headers = {}) {
+  const next = { ...headers };
+  const deviceId = getDeviceId();
+  if (deviceId) next["X-Device-Id"] = deviceId;
+  return next;
 }
 
 async function request(path, options = {}) {
   const { headers: optHeaders, skipAuth = false, timeoutMs = 8000, ...rest } = options;
-  const headers = { ...(optHeaders || {}) };
+  const headers = withDeviceHeaders({ ...(optHeaders || {}) });
   const base = resolveApiBase();
 
   if (rest.body != null && !headers["Content-Type"]) {
@@ -72,11 +82,25 @@ async function request(path, options = {}) {
         res.status
       );
     }
-    throw new ApiError(body.error || `請求失敗 (${res.status})`, res.status);
+    if (res.status === 429) {
+      throw new ApiError(body.error || "今日 AI 額度已用完", res.status, {
+        code: body.code || "AI_QUOTA_EXCEEDED",
+        payload: body,
+      });
+    }
+    throw new ApiError(body.error || `請求失敗 (${res.status})`, res.status, {
+      code: body.code || null,
+      payload: body,
+    });
   }
 
   if (res.status === 204) return null;
   return res.json();
+}
+
+/** 查詢今日 AI 剩餘次數 */
+export function fetchAiQuota() {
+  return request("/api/ai/quota", { method: "GET", timeoutMs: 6000 });
 }
 
 export function register({ name, email, password }) {
@@ -312,7 +336,10 @@ export async function askLiveSilentAiStream(
   };
 
   const base = resolveApiBase();
-  const headers = { "Content-Type": "application/json", Accept: "text/event-stream" };
+  const headers = withDeviceHeaders({
+    "Content-Type": "application/json",
+    Accept: "text/event-stream",
+  });
   const token = getToken();
   if (token) headers.Authorization = `Bearer ${token}`;
 
@@ -341,6 +368,15 @@ export async function askLiveSilentAiStream(
     clearSession();
   }
 
+  // 額度用盡：不可降級重打 /ask（會再扣一次）
+  if (res.status === 429) {
+    const body = await res.json().catch(() => ({}));
+    throw new ApiError(body.error || "今日 AI 額度已用完", 429, {
+      code: body.code || "AI_QUOTA_EXCEEDED",
+      payload: body,
+    });
+  }
+
   // 舊後端尚未部署 stream 路由、或代理不支援 → 降級
   if (res.status === 404 || res.status === 405 || res.status === 501 || res.status === 502) {
     return runOneshootFallback();
@@ -353,7 +389,10 @@ export async function askLiveSilentAiStream(
       (res.status >= 500
         ? "AI 服務暫時忙碌，請稍後重試"
         : `無法完成提問（${res.status}）`);
-    throw new ApiError(msg, res.status);
+    throw new ApiError(msg, res.status, {
+      code: body.code || null,
+      payload: body,
+    });
   }
   if (!res.body) {
     return runOneshootFallback();
