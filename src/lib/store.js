@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import * as api from "./api.js";
 import { connectSocket, disconnectSocket } from "./socket.js";
 
@@ -129,14 +129,17 @@ export function useMeetings(enabled = true) {
     setMeetings((prev) => prev.filter((m) => m.id !== id));
   }, []);
 
-  return {
-    meetings,
-    loading,
-    error,
-    createMeeting,
-    updateMeeting,
-    deleteMeeting,
-    refreshMeetings,
-    setMeetings,
-  };
+  return useMemo(
+    () => ({
+      meetings,
+      loading,
+      error,
+      createMeeting,
+      updateMeeting,
+      deleteMeeting,
+      refreshMeetings,
+      setMeetings,
+    }),
+    [meetings, loading, error, createMeeting, updateMeeting, deleteMeeting, refreshMeetings]
+  );
 }

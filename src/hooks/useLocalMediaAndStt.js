@@ -558,19 +558,28 @@ export function useLocalMediaAndStt({
           applyTrackState();
           if (wantMic) startSpeechRecognition();
           else stopSpeechRecognition();
-          return;
         }
-        if (wantMic || wantCam) {
+        // 進房一律取得音訊（鏡頭可關但仍拿 track 並 disabled）。
+        // iOS Safari 沒有 getUserMedia 就不能播放遠端 WebRTC 聲音。
+        try {
           await ensureCameraStream({ audio: true, video: true });
-          if (cancelled) return;
-          applyTrackState();
-          if (wantMic) startSpeechRecognition();
-          else stopSpeechRecognition();
-        } else {
-          setMicOn(false);
-          setCamOn(false);
-          setMediaReady(false);
+        } catch {
+          try {
+            await ensureCameraStream({ audio: true, video: false });
+          } catch (err) {
+            if (cancelled) return;
+            if (!camStreamRef.current) {
+              setMediaError(err?.message || "請允許麥克風權限，才能聽到其他人");
+              setMicOn(false);
+              setCamOn(false);
+              return;
+            }
+          }
         }
+        if (cancelled) return;
+        applyTrackState();
+        if (wantMicRef.current) startSpeechRecognition();
+        else stopSpeechRecognition();
       } catch (err) {
         if (cancelled) return;
         setMediaError(err?.message || "請允許鏡頭與麥克風權限");

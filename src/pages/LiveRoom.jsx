@@ -38,6 +38,7 @@ import { formatTranscriptForAi } from "../lib/meetingsCache.js";
 import {
   clearLiveTranscript,
   hydrateLiveTranscript,
+  mergeTranscriptRows,
   saveLiveTranscript,
 } from "../lib/liveTranscriptCache.js";
 import {
@@ -1101,6 +1102,14 @@ export default function LiveRoom({ meeting, store, go, social, me, onAgendaChang
         // 整場會議完整保留；僅在極端長度時裁舊句以防記憶體暴衝
         const clipped = next.length > 10_000 ? next.slice(-10_000) : next;
         saveLiveTranscript(meeting.id, clipped);
+        if (socketRef.current?.connected) {
+          socketRef.current.emit("transcript:line", {
+            meetingId: meeting.id,
+            id: clean.id,
+            time: clean.time,
+            text: clean.text,
+          });
+        }
         clearTimeout(transcriptPersistTimer.current);
         transcriptPersistTimer.current = setTimeout(() => {
           void persistTranscriptNow(clipped);
@@ -1513,6 +1522,11 @@ export default function LiveRoom({ meeting, store, go, social, me, onAgendaChang
     onAgendaChange?.(agendaIdx);
   }, [agendaIdx, onAgendaChange]);
 
+  const markRosterJoinedRef = useRef(markRosterJoined);
+  markRosterJoinedRef.current = markRosterJoined;
+  const meRef = useRef(me);
+  meRef.current = me;
+
   useEffect(() => {
     const meetingId = meeting?.id;
     if (!meetingId) {
@@ -1523,7 +1537,7 @@ export default function LiveRoom({ meeting, store, go, social, me, onAgendaChang
 
     const socket = connectSocket();
     socketRef.current = socket;
-    const userName = me?.name || "與會者";
+    const userName = meRef.current?.name || "與會者";
 
     const join = () => {
       setSyncState("connecting");
@@ -1542,9 +1556,9 @@ export default function LiveRoom({ meeting, store, go, social, me, onAgendaChang
       setPeerCount(count || 1);
       setSyncState("joined");
       setSyncError(null);
-      markRosterJoined({ name: joinedName || userName, id: me?.id || null });
+      markRosterJoinedRef.current({ name: joinedName || userName, id: meRef.current?.id || null });
       (Array.isArray(peers) ? peers : []).forEach((p) => {
-        if (p?.userName) markRosterJoined({ name: p.userName, id: p.userId || null });
+        if (p?.userName) markRosterJoinedRef.current({ name: p.userName, id: p.userId || null });
       });
     };
 
@@ -1559,7 +1573,7 @@ export default function LiveRoom({ meeting, store, go, social, me, onAgendaChang
 
     const onPeerJoined = ({ peerCount: count, userName: peerName, userId: peerId } = {}) => {
       setPeerCount(count || 1);
-      if (peerName) markRosterJoined({ name: peerName, id: peerId || null });
+      if (peerName) markRosterJoinedRef.current({ name: peerName, id: peerId || null });
     };
 
     const onPeerLeft = ({ peerCount: count }) => {
@@ -1611,6 +1625,13 @@ export default function LiveRoom({ meeting, store, go, social, me, onAgendaChang
       if (updated.memberReports && typeof updated.memberReports === "object") {
         setMemberReports(updated.memberReports);
       }
+      if (Array.isArray(updated.transcript) && updated.transcript.length) {
+        setTranscript((prev) => {
+          const next = mergeTranscriptRows(prev, updated.transcript);
+          saveLiveTranscript(meetingId, next);
+          return next;
+        });
+      }
 
       // 合併 attendees / inviteRoster / participants，以姓名去重
       const incoming = [];
@@ -1644,9 +1665,10 @@ export default function LiveRoom({ meeting, store, go, social, me, onAgendaChang
 
     const onKicked = ({ meetingId: mid, targetUserId, targetName, reason } = {}) => {
       if (mid && mid !== meetingId) return;
+      const self = meRef.current;
       const meHit =
-        (me?.id && targetUserId && me.id === targetUserId) ||
-        (targetName && normName(targetName) === normName(me?.name || userName));
+        (self?.id && targetUserId && self.id === targetUserId) ||
+        (targetName && normName(targetName) === normName(self?.name || userName));
       if (meHit) {
         try {
           sessionStorage.setItem(
@@ -1685,6 +1707,24 @@ export default function LiveRoom({ meeting, store, go, social, me, onAgendaChang
       }
     };
 
+    const onTranscriptLine = (row = {}) => {
+      const text = String(row.text || "").trim();
+      if (!text) return;
+      setTranscript((prev) => {
+        const next = mergeTranscriptRows(prev, [
+          {
+            id: row.id,
+            time: row.time,
+            at: row.at,
+            speaker: row.speaker || "與會者",
+            text,
+          },
+        ]);
+        saveLiveTranscript(meetingId, next);
+        return next;
+      });
+    };
+
     socket.on("meeting:joined", onJoined);
     socket.on("notes:sync", onNotesSync);
     socket.on("agenda:sync", onAgendaSync);
@@ -1695,6 +1735,7 @@ export default function LiveRoom({ meeting, store, go, social, me, onAgendaChang
     socket.on("meeting:updated", onMeetingUpdated);
     socket.on("meeting:kicked", onKicked);
     socket.on("meeting:reports", onReportsSync);
+    socket.on("transcript:line", onTranscriptLine);
     socket.on("connect", join);
 
     if (socket.connected) join();
@@ -1712,10 +1753,12 @@ export default function LiveRoom({ meeting, store, go, social, me, onAgendaChang
       socket.off("meeting:updated", onMeetingUpdated);
       socket.off("meeting:kicked", onKicked);
       socket.off("meeting:reports", onReportsSync);
+      socket.off("transcript:line", onTranscriptLine);
       typingPeers.current.forEach((v) => clearTimeout(v.timer));
       typingPeers.current.clear();
     };
-  }, [meeting.id, me?.name, me?.id, markRosterJoined, go]);
+    // 只在會議身分改變時進房／離房。倒數計時每秒 setState 不得重跑此 effect，否則會拆掉 WebRTC。
+  }, [meeting.id]);
 
   const selectAgenda = (i) => {
     const next = Math.max(0, Math.min(i, agenda.length - 1));

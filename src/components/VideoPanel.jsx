@@ -238,12 +238,10 @@ function RemoteStreamVideo({
         ref={elRef}
         autoPlay
         playsInline
-        className={`absolute inset-0 h-full w-full bg-navy-950 object-cover ${
-          showVideo ? "opacity-100" : "opacity-0 pointer-events-none"
-        }`}
+        className="absolute inset-0 h-full w-full bg-navy-950 object-cover"
       />
       {!showVideo ? (
-        <div className="absolute inset-0 flex flex-col items-center justify-center bg-gradient-to-br from-navy-700 via-navy-900 to-black">
+        <div className="absolute inset-0 z-[1] flex flex-col items-center justify-center bg-gradient-to-br from-navy-700 via-navy-900 to-black">
           <div
             className={`${
               compact ? "h-9 w-9 text-sm" : "h-12 w-12 text-base"

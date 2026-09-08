@@ -37,6 +37,7 @@ import {
   searchQuerySchema,
   summarizeSchema,
   toUserIdSchema,
+  transcriptLineSchema,
   typingSchema,
 } from "./schemas.js";
 import {
@@ -869,6 +870,36 @@ async function main() {
           socketId: socket.id,
           peers: rtcPeers,
           iceServers: buildIceServers(),
+        });
+      } catch {
+        /* ignore */
+      }
+    });
+
+    socket.on("transcript:line", async (raw = {}) => {
+      try {
+        const data = parseOrThrow(transcriptLineSchema, raw, "逐字稿");
+        if (currentRoom !== data.meetingId) return;
+        const meeting = await store.getAccessible(data.meetingId, socket.user.id);
+        if (!meeting) return;
+        const row = {
+          id: data.id || `stt-${Date.now()}-${String(socket.id || "").slice(-6)}`,
+          time: data.time || "",
+          at: Date.now(),
+          speaker: socket.user.name || "與會者",
+          speakerId: socket.user.id,
+          text: data.text,
+        };
+        socket.to(data.meetingId).emit("transcript:line", row);
+        const prev = Array.isArray(meeting.transcript) ? meeting.transcript : [];
+        if (prev.some((r) => r && r.id === row.id)) return;
+        const next = [...prev, row].slice(-10_000);
+        const transcriptText = next
+          .map((r) => `${r.speaker || "與會者"}：${r.text || ""}`)
+          .join("\n");
+        await store.updateAccessible(data.meetingId, socket.user.id, {
+          transcript: next,
+          transcriptText,
         });
       } catch {
         /* ignore */

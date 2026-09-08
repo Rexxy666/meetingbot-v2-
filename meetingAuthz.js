@@ -161,9 +161,13 @@ export function filterTrustedMeetingPatch(rawPatch, meeting, user) {
       continue;
     }
     if (EDIT_KEYS.has(key)) {
+      if (key === "transcript" || key === "transcriptText") {
+        if (isMember) out[key] = value;
+        continue;
+      }
       if (
         canEdit ||
-        (canEnd && ["notes", "topicNotes", "transcript", "transcriptText", "aiSource"].includes(key))
+        (canEnd && ["notes", "topicNotes", "aiSource"].includes(key))
       ) {
         out[key] = value;
       }

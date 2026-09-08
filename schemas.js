@@ -134,7 +134,17 @@ const transcriptRowSchema = z
     speaker: optStr(80),
     name: optStr(80),
     text: z.string().max(8000),
-    at: optStr(32),
+    at: z.union([z.string().max(32), z.number().finite()]).optional(),
+  })
+  .strip();
+
+/** 即時逐字稿一句：講者由 JWT 決定，不信任前端 speaker */
+export const transcriptLineSchema = z
+  .object({
+    meetingId: nonEmpty(80),
+    text: z.string().trim().min(1).max(8000),
+    time: optStr(16),
+    id: optStr(120),
   })
   .strip();
 

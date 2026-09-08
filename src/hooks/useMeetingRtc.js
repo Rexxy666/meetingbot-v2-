@@ -88,6 +88,9 @@ export function useMeetingRtc({
       ? screen?.getVideoTracks?.()[0] || cam?.getVideoTracks?.()[0] || null
       : cam?.getVideoTracks?.()[0] || null;
 
+    const prevAudio = entry.audioSender?.track || null;
+    const prevVideo = entry.videoSender?.track || null;
+
     const replace = async (sender, track) => {
       if (!sender) return;
       if (sender.track === track) return;
@@ -100,7 +103,22 @@ export function useMeetingRtc({
 
     await replace(entry.audioSender, audio);
     await replace(entry.videoSender, video);
-  }, []);
+
+    const becameLive =
+      (!prevAudio && audio) || (!prevVideo && video);
+    if (becameLive && !entry.polite && pc.signalingState === "stable") {
+      try {
+        entry.makingOffer = true;
+        await pc.setLocalDescription(await pc.createOffer());
+        const sdp = pc.localDescription?.sdp;
+        if (sdp) sendSignal(entry.socketId, { type: "offer", sdp });
+      } catch (err) {
+        console.warn("[rtc] renegotiate", err?.message || err);
+      } finally {
+        entry.makingOffer = false;
+      }
+    }
+  }, [sendSignal]);
 
   const closePeer = useCallback(
     (socketId) => {
@@ -302,9 +320,20 @@ export function useMeetingRtc({
     for (const id of [...peersRef.current.keys()]) closePeer(id);
   }, [closePeer]);
 
+  const handleSignalRef = useRef(handleSignal);
+  handleSignalRef.current = handleSignal;
+  const handleMediaRef = useRef(handleMedia);
+  handleMediaRef.current = handleMedia;
+  const ensurePeerRef = useRef(ensurePeer);
+  ensurePeerRef.current = ensurePeer;
+  const closePeerRef = useRef(closePeer);
+  closePeerRef.current = closePeer;
+  const resetAllRef = useRef(resetAll);
+  resetAllRef.current = resetAll;
+
   useEffect(() => {
     if (!enabled || !meetingId) {
-      resetAll();
+      resetAllRef.current();
       return undefined;
     }
 
@@ -319,7 +348,7 @@ export function useMeetingRtc({
       }
       const list = Array.isArray(peers) ? peers : [];
       for (const p of list) {
-        ensurePeer(p);
+        ensurePeerRef.current(p);
       }
     };
 
@@ -331,20 +360,23 @@ export function useMeetingRtc({
     const onPeerJoined = ({ socketId, userName, userId } = {}) => {
       if (!socketId || socketId === socket.id) return;
       selfIdRef.current = socket.id || selfIdRef.current;
-      ensurePeer({ socketId, userName, userId });
+      ensurePeerRef.current({ socketId, userName, userId });
     };
 
     const onPeerLeft = ({ socketId } = {}) => {
-      if (socketId) closePeer(socketId);
+      if (socketId) closePeerRef.current(socketId);
     };
+
+    const onSignal = (payload) => handleSignalRef.current(payload);
+    const onMedia = (payload) => handleMediaRef.current(payload);
 
     socket.on("connect", onConnect);
     socket.on("meeting:joined", applyRoster);
     socket.on("rtc:peers", applyRoster);
     socket.on("peer:joined", onPeerJoined);
     socket.on("peer:left", onPeerLeft);
-    socket.on("rtc:signal", handleSignal);
-    socket.on("rtc:media", handleMedia);
+    socket.on("rtc:signal", onSignal);
+    socket.on("rtc:media", onMedia);
 
     if (socket.connected) {
       socket.emit("rtc:peers", { meetingId });
@@ -356,11 +388,11 @@ export function useMeetingRtc({
       socket.off("rtc:peers", applyRoster);
       socket.off("peer:joined", onPeerJoined);
       socket.off("peer:left", onPeerLeft);
-      socket.off("rtc:signal", handleSignal);
-      socket.off("rtc:media", handleMedia);
-      resetAll();
+      socket.off("rtc:signal", onSignal);
+      socket.off("rtc:media", onMedia);
+      resetAllRef.current();
     };
-  }, [enabled, meetingId, closePeer, ensurePeer, handleMedia, handleSignal, resetAll]);
+  }, [enabled, meetingId]);
 
   useEffect(() => {
     if (!enabled || !meetingId) return undefined;
