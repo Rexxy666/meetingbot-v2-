@@ -83,11 +83,11 @@ function useSafeMediaRef(parentRef) {
   return [elRef, setNode];
 }
 
-function bindStreamToEl(el, stream, { mirror = false } = {}) {
+function bindStreamToEl(el, stream, { mirror = false, muted = true } = {}) {
   if (!el) return;
   if (stream) {
     if (el.srcObject !== stream) el.srcObject = stream;
-    el.muted = true;
+    el.muted = muted;
     el.playsInline = true;
     el.autoplay = true;
     el.classList.toggle("scale-x-[-1]", mirror);
@@ -184,9 +184,97 @@ function ScreenStreamVideo({ parentRef, getStream, active, mediaReady }) {
   );
 }
 
+function hasLiveAudioTrack(stream) {
+  if (!stream?.getAudioTracks) return false;
+  return stream.getAudioTracks().some((t) => t.readyState === "live");
+}
+
 /**
- * 焦點主畫面播放器（Full / Focus View）
+ * 遠端音視訊：不可靜音，否則聽不到對方
  */
+function RemoteStreamVideo({
+  stream,
+  name = "?",
+  compact = false,
+  camOn = true,
+  connectionState = "",
+  trackSig = "",
+}) {
+  const elRef = useRef(null);
+  const [needGesture, setNeedGesture] = useState(false);
+  const showVideo = camOn && hasLiveVideoTrack(stream);
+  const connecting =
+    connectionState &&
+    connectionState !== "connected" &&
+    connectionState !== "completed";
+
+  useEffect(() => {
+    const el = elRef.current;
+    if (!el || !stream) return;
+    bindStreamToEl(el, stream, { mirror: false, muted: false });
+    el.muted = false;
+    el.volume = 1;
+    const play = el.play();
+    if (play?.then) {
+      play.then(() => setNeedGesture(false)).catch(() => setNeedGesture(true));
+    } else {
+      setNeedGesture(false);
+    }
+  }, [stream, trackSig]);
+
+  const unlockAudio = () => {
+    const el = elRef.current;
+    if (!el) return;
+    el.muted = false;
+    const p = el.play();
+    if (p?.catch) p.catch(() => {});
+    else setNeedGesture(false);
+    setNeedGesture(false);
+  };
+
+  return (
+    <>
+      <video
+        ref={elRef}
+        autoPlay
+        playsInline
+        className={`absolute inset-0 h-full w-full bg-navy-950 object-cover ${
+          showVideo ? "opacity-100" : "opacity-0 pointer-events-none"
+        }`}
+      />
+      {!showVideo ? (
+        <div className="absolute inset-0 flex flex-col items-center justify-center bg-gradient-to-br from-navy-700 via-navy-900 to-black">
+          <div
+            className={`${
+              compact ? "h-9 w-9 text-sm" : "h-12 w-12 text-base"
+            } rounded-full ${avatarColor(name)} flex items-center justify-center text-white font-black ring-1 ring-white/20`}
+          >
+            {(name || "?").slice(0, 1)}
+          </div>
+          {!compact && (
+            <p className="mt-1.5 text-[10px] text-white/55">
+              {connecting
+                ? "正在連線音視訊…"
+                : hasLiveAudioTrack(stream)
+                ? "鏡頭已關閉 · 聲音已接通"
+                : "等待對方媒體…"}
+            </p>
+          )}
+        </div>
+      ) : null}
+      {needGesture ? (
+        <button
+          type="button"
+          onClick={unlockAudio}
+          className="absolute inset-x-2 bottom-8 z-[2] rounded-full bg-mint-500/90 px-3 py-1.5 text-[10px] font-bold text-navy-900"
+        >
+          點擊開啟對方聲音
+        </button>
+      ) : null}
+    </>
+  );
+}
+
 function FocusedVideoPlayer({
   tile,
   currentUserName,
@@ -229,14 +317,15 @@ function FocusedVideoPlayer({
   }
 
   return (
-    <div className="absolute inset-0 w-full h-full flex flex-col items-center justify-center bg-gradient-to-br from-navy-700 via-navy-900 to-black">
-      <div
-        className={`h-28 w-28 rounded-full ${avatarColor(tile.name || tile.label)} flex items-center justify-center text-white text-4xl font-black ring-2 ring-white/20 shadow-lg`}
-      >
-        {(tile.name || tile.label || "?").slice(0, 1)}
-      </div>
-      <p className="mt-4 text-base font-bold text-white">{tile.label}</p>
-      <p className="mt-1.5 text-xs text-white/45">遠端視訊待接 WebRTC</p>
+    <div className="absolute inset-0 w-full h-full bg-navy-950">
+      <RemoteStreamVideo
+        stream={tile.stream}
+        name={tile.name || tile.label}
+        compact={false}
+        camOn={tile.remoteCamOn !== false}
+        connectionState={tile.connectionState}
+        trackSig={tile.trackSig}
+      />
     </div>
   );
 }
@@ -335,6 +424,11 @@ export default function VideoPanel({
         kind: "remote",
         label: p.name,
         name: p.name,
+        muted: p.remoteMicOn === false,
+        stream: p.stream || null,
+        trackSig: p.trackSig || "",
+        remoteCamOn: p.remoteCamOn !== false,
+        connectionState: p.connectionState || "",
       });
     });
     return list;
@@ -440,23 +534,21 @@ export default function VideoPanel({
     />
   );
 
-  const renderRemoteBody = (name, compact = false) => (
-    <div className="absolute inset-0 flex flex-col items-center justify-center bg-gradient-to-br from-navy-700/40 via-navy-900 to-black">
-      <div
-        className={`${compact ? "h-9 w-9 text-sm" : "h-12 w-12 text-base"} rounded-full ${avatarColor(
-          name
-        )} flex items-center justify-center text-white font-black ring-1 ring-white/20`}
-      >
-        {(name || "?").slice(0, 1)}
-      </div>
-      {!compact && <p className="mt-1.5 text-[10px] text-white/40">遠端視訊待接 WebRTC</p>}
-    </div>
+  const renderRemoteBody = (tile, compact = false) => (
+    <RemoteStreamVideo
+      stream={tile.stream}
+      name={tile.name || tile.label}
+      compact={compact}
+      camOn={tile.remoteCamOn !== false}
+      connectionState={tile.connectionState}
+      trackSig={tile.trackSig}
+    />
   );
 
   const renderTileContent = (tile, compact = false) => {
     if (tile.kind === "self") return renderSelfBody(compact);
     if (tile.kind === "screen") return renderScreenBody();
-    return renderRemoteBody(tile.name || tile.label, compact);
+    return renderRemoteBody(tile, compact);
   };
 
   const tileChromeProps = (tile, extraClass) => ({
@@ -573,7 +665,7 @@ export default function VideoPanel({
                 ) : tile.kind === "screen" && useLiveScreen ? (
                   renderScreenBody()
                 ) : tile.kind === "remote" ? (
-                  renderRemoteBody(tile.name || tile.label, true)
+                  renderRemoteBody(tile, true)
                 ) : tile.kind === "self" ? (
                   <CameraOffFallback name={currentUserName} compact label={`${currentUserName}（你）`} />
                 ) : (
@@ -591,6 +683,15 @@ export default function VideoPanel({
   return (
     <div
       ref={rootRef}
+      onPointerDown={() => {
+        const root = rootRef.current;
+        if (!root) return;
+        root.querySelectorAll("video").forEach((el) => {
+          if (el.muted) return;
+          const p = el.play();
+          if (p?.catch) p.catch(() => {});
+        });
+      }}
       className="relative flex flex-col min-h-0 h-full bg-gradient-to-b from-navy-900 via-navy-800 to-[#0f1b2d] rounded-3xl border border-white/10 shadow-card overflow-hidden"
     >
       <div

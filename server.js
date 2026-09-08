@@ -32,6 +32,8 @@ import {
   profileSchema,
   registerSchema,
   respondSchema,
+  rtcMediaSchema,
+  rtcSignalSchema,
   searchQuerySchema,
   summarizeSchema,
   toUserIdSchema,
@@ -47,6 +49,41 @@ import {
 } from "./meetingAuthz.js";
 
 const PORT = Number(process.env.PORT) || 3001;
+
+function buildIceServers() {
+  const servers = [
+    { urls: ["stun:stun.l.google.com:19302", "stun:stun1.l.google.com:19302"] },
+  ];
+  const turnUrl = String(process.env.TURN_URL || "").trim();
+  const turnUser = String(process.env.TURN_USERNAME || "").trim();
+  const turnCred = String(process.env.TURN_CREDENTIAL || "").trim();
+  if (turnUrl && turnUser && turnCred) {
+    const urls = turnUrl.split(",").map((s) => s.trim()).filter(Boolean);
+    if (urls.length) {
+      servers.push({
+        urls: urls.length === 1 ? urls[0] : urls,
+        username: turnUser,
+        credential: turnCred,
+      });
+    }
+  }
+  return servers;
+}
+
+async function listRtcPeers(io, meetingId, exceptSocketId) {
+  try {
+    const socks = await io.in(meetingId).fetchSockets();
+    return socks
+      .filter((s) => s.id && s.id !== exceptSocketId)
+      .map((s) => ({
+        socketId: s.id,
+        userId: s.user?.id || null,
+        userName: s.user?.name || "與會者",
+      }));
+  } catch {
+    return [];
+  }
+}
 
 const DEFAULT_ALLOWED_ORIGINS = [
   "http://localhost:5173",
@@ -747,10 +784,19 @@ async function main() {
         const peerCount = peers ? peers.size : 1;
         // 顯示名稱一律用伺服器 JWT 身分，不信任前端 userName
         const displayName = socket.user.name || "與會者";
+        const rtcPeers = await listRtcPeers(io, meetingId, socket.id);
 
-        socket.emit("meeting:joined", { meeting, peerCount, userName: displayName });
+        socket.emit("meeting:joined", {
+          meeting,
+          peerCount,
+          userName: displayName,
+          socketId: socket.id,
+          peers: rtcPeers,
+          iceServers: buildIceServers(),
+        });
         socket.to(meetingId).emit("peer:joined", {
           socketId: socket.id,
+          userId: socket.user.id || null,
           userName: displayName,
           peerCount,
         });
@@ -774,6 +820,59 @@ async function main() {
       const peers = io.sockets.adapter.rooms.get(room);
       const peerCount = peers ? peers.size : 0;
       socket.to(room).emit("peer:left", { socketId: socket.id, peerCount });
+    });
+
+    socket.on("rtc:signal", async (raw = {}) => {
+      try {
+        const data = parseOrThrow(rtcSignalSchema, raw, "WebRTC 信令");
+        if (currentRoom !== data.meetingId) return;
+        const meeting = await store.getAccessible(data.meetingId, socket.user.id);
+        if (!meeting) return;
+        if (data.toSocketId === socket.id) return;
+        const roomSocks = await io.in(data.meetingId).fetchSockets();
+        const target = roomSocks.find((s) => s.id === data.toSocketId);
+        if (!target) return;
+        target.emit("rtc:signal", {
+          fromSocketId: socket.id,
+          fromUserId: socket.user.id || null,
+          fromUserName: socket.user.name || "與會者",
+          data: data.data,
+        });
+      } catch {
+        /* ignore invalid */
+      }
+    });
+
+    socket.on("rtc:media", (raw = {}) => {
+      try {
+        const data = parseOrThrow(rtcMediaSchema, raw, "媒體狀態");
+        if (currentRoom !== data.meetingId) return;
+        socket.to(data.meetingId).emit("rtc:media", {
+          fromSocketId: socket.id,
+          micOn: Boolean(data.micOn),
+          camOn: Boolean(data.camOn),
+          screenSharing: Boolean(data.screenSharing),
+        });
+      } catch {
+        /* ignore */
+      }
+    });
+
+    socket.on("rtc:peers", async (raw = {}) => {
+      try {
+        const { meetingId } = parseOrThrow(joinMeetingSocketSchema, raw, "RTC 對端");
+        if (currentRoom !== meetingId) return;
+        const meeting = await store.getAccessible(meetingId, socket.user.id);
+        if (!meeting) return;
+        const rtcPeers = await listRtcPeers(io, meetingId, socket.id);
+        socket.emit("rtc:peers", {
+          socketId: socket.id,
+          peers: rtcPeers,
+          iceServers: buildIceServers(),
+        });
+      } catch {
+        /* ignore */
+      }
     });
 
     socket.on("notes:update", async (raw = {}) => {

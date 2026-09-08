@@ -259,4 +259,28 @@ export const meetingReportSchema = z
   })
   .strip();
 
+/** WebRTC 信令：僅轉送 SDP／ICE，身分以 socket.user 為準 */
+export const rtcSignalSchema = z
+  .object({
+    meetingId: nonEmpty(80),
+    toSocketId: nonEmpty(120),
+    data: z
+      .object({
+        type: z.enum(["offer", "answer", "ice"]),
+        sdp: z.string().max(200_000).optional(),
+        candidate: z.unknown().optional(),
+      })
+      .strip(),
+  })
+  .strip();
+
+export const rtcMediaSchema = z
+  .object({
+    meetingId: nonEmpty(80),
+    micOn: z.boolean().optional(),
+    camOn: z.boolean().optional(),
+    screenSharing: z.boolean().optional(),
+  })
+  .strip();
+
 export const idParamSchema = z.string().trim().min(1).max(80);

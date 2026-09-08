@@ -48,6 +48,7 @@ import { flattenNotesDoc } from "../lib/notesDocument.js";
 import { connectSocket } from "../lib/socket.js";
 import { inviteToMeeting } from "../lib/api.js";
 import { useLocalMediaAndStt } from "../hooks/useLocalMediaAndStt.js";
+import { useMeetingRtc } from "../hooks/useMeetingRtc.js";
 import VideoPanel from "../components/VideoPanel.jsx";
 
 const TYPING_PALETTE = [
@@ -1153,6 +1154,17 @@ export default function LiveRoom({ meeting, store, go, social, me, onAgendaChang
     initialMediaSettings,
   });
 
+  const rtcRemotes = useMeetingRtc({
+    enabled: Boolean(meeting?.id) && meetingStatus !== "ended",
+    meetingId: meeting.id,
+    getCameraStream,
+    getScreenStream,
+    micOn,
+    camOn,
+    screenSharing,
+    mediaReady,
+  });
+
   /** 將 roster 寫回會議，供會後 Who 認領名單使用（寫入前強制去重） */
   const persistRoster = useCallback(
     (next) => {
@@ -1223,21 +1235,27 @@ export default function LiveRoom({ meeting, store, go, social, me, onAgendaChang
     return names;
   }, [hostName, currentUserName, roster, meeting.participants, meeting.attendees]);
 
-  /** 視訊網格：在線與會者佔位（joined 優先，否則用名冊） */
+  /** 視訊網格：以實際在線 WebRTC 對端為準（不再用名冊佔位假裝已接通） */
   const videoParticipants = useMemo(() => {
-    const joined = dedupeRoster(roster).filter((p) => p.status === "joined");
-    const base = joined.length
-      ? joined
-      : memberNames.map((name) => ({ name, status: "joined", id: null }));
     const meRow = {
       id: me?.id || "me",
       name: currentUserName,
       status: "joined",
       isSelf: true,
     };
-    const others = base.filter((p) => normName(p.name) !== normName(currentUserName));
-    return [meRow, ...others].slice(0, 8);
-  }, [roster, memberNames, currentUserName, me?.id]);
+    const others = rtcRemotes.map((p) => ({
+      id: p.socketId,
+      name: p.userName || "與會者",
+      status: "joined",
+      isSelf: false,
+      stream: p.stream || null,
+      trackSig: p.trackSig || "",
+      remoteMicOn: p.micOn !== false,
+      remoteCamOn: p.camOn !== false,
+      connectionState: p.connectionState || p.iceState || "",
+    }));
+    return [meRow, ...others];
+  }, [rtcRemotes, currentUserName, me?.id]);
 
   /** 逐字稿自動滾到底部（含即時 interim；使用者上翻時不強制拉回） */
   useEffect(() => {
@@ -1513,7 +1531,7 @@ export default function LiveRoom({ meeting, store, go, social, me, onAgendaChang
       socket.emit("join-meeting", { meetingId, userName });
     };
 
-    const onJoined = ({ meeting: joined, peerCount: count, userName: joinedName }) => {
+    const onJoined = ({ meeting: joined, peerCount: count, userName: joinedName, peers } = {}) => {
       if (joined?.topicNotes) setTopicNotes(joined.topicNotes);
       if (joined?.goals) {
         setAgenda(normalizeAgendaNames(joined.goals));
@@ -1524,8 +1542,10 @@ export default function LiveRoom({ meeting, store, go, social, me, onAgendaChang
       setPeerCount(count || 1);
       setSyncState("joined");
       setSyncError(null);
-      // 自己進房 → 立刻標為已加入
       markRosterJoined({ name: joinedName || userName, id: me?.id || null });
+      (Array.isArray(peers) ? peers : []).forEach((p) => {
+        if (p?.userName) markRosterJoined({ name: p.userName, id: p.userId || null });
+      });
     };
 
     const onNotesSync = ({ topicNotes: synced, topic: t, content, from }) => {
@@ -1537,10 +1557,9 @@ export default function LiveRoom({ meeting, store, go, social, me, onAgendaChang
       if (typeof idx === "number") setAgendaIdx(idx);
     };
 
-    const onPeerJoined = ({ peerCount: count, userName: peerName }) => {
+    const onPeerJoined = ({ peerCount: count, userName: peerName, userId: peerId } = {}) => {
       setPeerCount(count || 1);
-      // 在線人數與 roster 狀態強綁定：有人進房就把對應名字標成已加入
-      if (peerName) markRosterJoined({ name: peerName });
+      if (peerName) markRosterJoined({ name: peerName, id: peerId || null });
     };
 
     const onPeerLeft = ({ peerCount: count }) => {

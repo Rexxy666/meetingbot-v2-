@@ -290,22 +290,37 @@ export default function GreenRoom({ meeting, me, onCancel, onJoin }) {
 
   const joinLabel = describeJoinState(mediaSettings);
 
+  const joinCta = (
+    <>
+      <button
+        type="button"
+        disabled={busyJoin}
+        onClick={handleJoin}
+        className="w-full h-12 rounded-xl bg-coral-500 hover:bg-coral-400 text-white text-sm font-bold shadow-sm transition-colors disabled:opacity-60 active:scale-[0.99] touch-manipulation"
+      >
+        {busyJoin ? "進入中…" : "立即加入會議"}
+      </button>
+      <p className="text-center text-xs font-medium text-navy-400">{joinLabel}</p>
+    </>
+  );
+
   return (
-    <div className="fade-in min-h-[calc(100vh-4rem)] md:min-h-screen bg-gradient-to-b from-coral-50/40 via-white to-mint-50/30">
-      <div className="max-w-6xl mx-auto px-4 md:px-8 py-5 md:py-10">
+    <div className="fade-in h-full min-h-0 flex-1 flex flex-col bg-gradient-to-b from-coral-50/40 via-white to-mint-50/30">
+      <div className="flex-1 min-h-0 overflow-y-auto overscroll-contain px-4 md:px-8 py-4 md:py-8">
+        <div className="max-w-6xl mx-auto">
         <button
           type="button"
           onClick={handleCancel}
-          className="inline-flex items-center gap-1.5 text-sm font-semibold text-navy-500 hover:text-navy-800 mb-5"
+          className="inline-flex items-center gap-1.5 text-sm font-semibold text-navy-500 hover:text-navy-800 mb-4"
         >
           <ArrowLeft className="h-4 w-4" strokeWidth={2.2} />
           返回看板
         </button>
 
-        <div className="grid grid-cols-1 lg:grid-cols-[1.4fr_1fr] gap-5 lg:gap-8 items-start">
-          {/* 左側：16:9 視訊預覽 */}
+        <div className="grid grid-cols-1 lg:grid-cols-[1.4fr_1fr] gap-4 lg:gap-8 items-start pb-3 lg:pb-0">
+          {/* 左側：視訊預覽（手機限制高度，避免把加入按鈕擠出畫面） */}
           <section className={`${CARD} overflow-hidden`}>
-            <div className="relative aspect-[16/10] md:aspect-[16/9] bg-slate-900">
+            <div className="relative h-[min(32svh,13.5rem)] sm:h-[min(36svh,16rem)] md:h-auto md:aspect-[16/9] bg-slate-900">
               {!mediaSettings.isVideoOff ? (
                 <video
                   ref={videoRef}
@@ -319,7 +334,7 @@ export default function GreenRoom({ meeting, me, onCancel, onJoin }) {
                   <Avatar
                     name={displayName}
                     src={me?.photoURL}
-                    size="h-24 w-24 text-2xl"
+                    size="h-16 w-16"
                     color={avatarColor}
                     ring={false}
                   />
@@ -450,17 +465,14 @@ export default function GreenRoom({ meeting, me, onCancel, onJoin }) {
               </label>
             </div>
 
-            <button
-              type="button"
-              disabled={busyJoin}
-              onClick={handleJoin}
-              className="w-full h-12 rounded-xl bg-coral-500 hover:bg-coral-400 text-white text-sm font-bold shadow-sm transition-colors disabled:opacity-60 active:scale-[0.99]"
-            >
-              {busyJoin ? "進入中…" : "立即加入"}
-            </button>
-            <p className="text-center text-xs font-medium text-navy-400 -mt-2">{joinLabel}</p>
+            <div className="hidden lg:flex flex-col gap-2">{joinCta}</div>
           </aside>
         </div>
+        </div>
+      </div>
+
+      <div className="lg:hidden shrink-0 border-t border-gray-100 bg-white/95 backdrop-blur-md px-4 pt-3 pb-[max(0.75rem,env(safe-area-inset-bottom))] space-y-1.5">
+        {joinCta}
       </div>
     </div>
   );

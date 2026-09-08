@@ -206,7 +206,7 @@ export default function App() {
           immersiveLive ? "pb-0 overflow-hidden" : "pb-24 md:pb-0"
         }`}
       >
-        <div className={`flex-1 min-h-0 ${immersiveLive ? "overflow-hidden" : ""}`}>
+        <div className={`flex-1 min-h-0 ${immersiveLive ? "overflow-hidden h-full flex flex-col" : ""}`}>
           {page === "dashboard" && <Dashboard store={store} go={go} me={auth.user} mode={mode} />}
           {page === "create" && <CreateMeeting store={store} go={go} modeId={mode} friends={social.friends} />}
           {page === "prejoin" &&
