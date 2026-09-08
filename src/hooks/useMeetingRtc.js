@@ -3,6 +3,7 @@ import { connectSocket } from "../lib/socket.js";
 
 const DEFAULT_ICE = [
   { urls: ["stun:stun.l.google.com:19302", "stun:stun1.l.google.com:19302"] },
+  { urls: ["stun:stun2.l.google.com:19302", "stun:stun3.l.google.com:19302"] },
 ];
 
 function trackSigOf(stream) {
@@ -11,6 +12,10 @@ function trackSigOf(stream) {
     .getTracks()
     .map((t) => `${t.kind}:${t.id}:${t.readyState}:${t.enabled ? 1 : 0}`)
     .join("|");
+}
+
+function isOfferer(selfId, remoteId) {
+  return String(selfId || "") < String(remoteId || "");
 }
 
 function peerSnapshot(entry) {
@@ -36,14 +41,13 @@ async function flushIce(entry) {
     try {
       await pc.addIceCandidate(candidate);
     } catch {
-      /* ignore stale ICE */
+      /* ignore */
     }
   }
 }
 
 /**
- * 會議室 mesh WebRTC：每位與會者與房內其他人建立 PeerConnection，
- * 經 Socket.IO 轉送 SDP／ICE。遠端音訊必須 unmute 才能聽到對方。
+ * 會議室 mesh WebRTC。socketId 較小的一方當 offerer；另一方用 pull-offer 請對方重送，避免 glare。
  */
 export function useMeetingRtc({
   enabled = false,
@@ -57,6 +61,7 @@ export function useMeetingRtc({
 }) {
   const [remotes, setRemotes] = useState([]);
   const peersRef = useRef(new Map());
+  const pendingPeersRef = useRef([]);
   const iceServersRef = useRef(DEFAULT_ICE);
   const selfIdRef = useRef("");
   const mediaRef = useRef({ getCameraStream, getScreenStream, micOn, camOn, screenSharing });
@@ -76,49 +81,65 @@ export function useMeetingRtc({
     socket.emit("rtc:signal", { meetingId: mid, toSocketId, data });
   }, []);
 
-  const syncTracks = useCallback(async (entry) => {
-    const pc = entry?.pc;
-    if (!pc || pc.connectionState === "closed") return;
-    const { getCameraStream: getCam, getScreenStream: getScreen, screenSharing: sharing } =
-      mediaRef.current;
-    const cam = typeof getCam === "function" ? getCam() : null;
-    const screen = typeof getScreen === "function" ? getScreen() : null;
-    const audio = cam?.getAudioTracks?.()[0] || null;
-    const video = sharing
-      ? screen?.getVideoTracks?.()[0] || cam?.getVideoTracks?.()[0] || null
-      : cam?.getVideoTracks?.()[0] || null;
-
-    const prevAudio = entry.audioSender?.track || null;
-    const prevVideo = entry.videoSender?.track || null;
-
-    const replace = async (sender, track) => {
-      if (!sender) return;
-      if (sender.track === track) return;
-      try {
-        await sender.replaceTrack(track);
-      } catch {
-        /* ignore */
-      }
-    };
-
-    await replace(entry.audioSender, audio);
-    await replace(entry.videoSender, video);
-
-    const becameLive =
-      (!prevAudio && audio) || (!prevVideo && video);
-    if (becameLive && !entry.polite && pc.signalingState === "stable") {
+  const makeOffer = useCallback(
+    async (entry) => {
+      const pc = entry?.pc;
+      if (!pc || pc.connectionState === "closed") return;
+      if (!isOfferer(selfIdRef.current, entry.socketId)) return;
+      if (entry.makingOffer || pc.signalingState !== "stable") return;
       try {
         entry.makingOffer = true;
         await pc.setLocalDescription(await pc.createOffer());
         const sdp = pc.localDescription?.sdp;
         if (sdp) sendSignal(entry.socketId, { type: "offer", sdp });
       } catch (err) {
-        console.warn("[rtc] renegotiate", err?.message || err);
+        console.warn("[rtc] offer", err?.message || err);
       } finally {
         entry.makingOffer = false;
       }
-    }
-  }, [sendSignal]);
+    },
+    [sendSignal]
+  );
+
+  const syncTracks = useCallback(
+    async (entry) => {
+      const pc = entry?.pc;
+      if (!pc || pc.connectionState === "closed") return;
+      const { getCameraStream: getCam, getScreenStream: getScreen, screenSharing: sharing } =
+        mediaRef.current;
+      const cam = typeof getCam === "function" ? getCam() : null;
+      const screen = typeof getScreen === "function" ? getScreen() : null;
+      const audio = cam?.getAudioTracks?.()[0] || null;
+      const video = sharing
+        ? screen?.getVideoTracks?.()[0] || cam?.getVideoTracks?.()[0] || null
+        : cam?.getVideoTracks?.()[0] || null;
+
+      const prevAudio = entry.audioSender?.track || null;
+      const prevVideo = entry.videoSender?.track || null;
+
+      const replace = async (sender, track) => {
+        if (!sender) return;
+        if (sender.track === track) return;
+        try {
+          await sender.replaceTrack(track);
+        } catch {
+          /* ignore */
+        }
+      };
+
+      await replace(entry.audioSender, audio);
+      await replace(entry.videoSender, video);
+
+      const becameLive = (!prevAudio && audio) || (!prevVideo && video);
+      if (!becameLive) return;
+      if (isOfferer(selfIdRef.current, entry.socketId)) {
+        await makeOffer(entry);
+      } else {
+        sendSignal(entry.socketId, { type: "pull-offer" });
+      }
+    },
+    [makeOffer, sendSignal]
+  );
 
   const closePeer = useCallback(
     (socketId) => {
@@ -143,7 +164,13 @@ export function useMeetingRtc({
   const ensurePeer = useCallback(
     (info) => {
       const socketId = String(info?.socketId || "");
-      if (!socketId || socketId === selfIdRef.current) return null;
+      const selfId = selfIdRef.current || connectSocket().id || "";
+      selfIdRef.current = selfId;
+      if (!socketId || socketId === selfId) return null;
+      if (!selfId) {
+        pendingPeersRef.current.push(info);
+        return null;
+      }
       const existing = peersRef.current.get(socketId);
       if (existing) {
         if (info.userName) existing.userName = info.userName;
@@ -154,7 +181,6 @@ export function useMeetingRtc({
       const pc = new RTCPeerConnection({
         iceServers: iceServersRef.current,
         bundlePolicy: "max-bundle",
-        iceCandidatePoolSize: 4,
       });
       const audioTransceiver = pc.addTransceiver("audio", { direction: "sendrecv" });
       const videoTransceiver = pc.addTransceiver("video", { direction: "sendrecv" });
@@ -168,9 +194,8 @@ export function useMeetingRtc({
         audioSender: audioTransceiver.sender,
         videoSender: videoTransceiver.sender,
         makingOffer: false,
-        ignoreOffer: false,
-        polite: String(selfIdRef.current) > socketId,
         pendingIce: [],
+        failCount: 0,
         micOn: true,
         camOn: true,
         screenSharing: false,
@@ -200,27 +225,25 @@ export function useMeetingRtc({
         publishRemotes();
       };
 
-      pc.onnegotiationneeded = async () => {
-        // socketId 較小的一方當 offerer，避免 glare；Safari 也不支援 rollback
-        if (entry.polite) return;
-        try {
-          entry.makingOffer = true;
-          await pc.setLocalDescription(await pc.createOffer());
-          const sdp = pc.localDescription?.sdp;
-          if (sdp) sendSignal(socketId, { type: "offer", sdp });
-        } catch (err) {
-          console.warn("[rtc] negotiationneeded", err?.message || err);
-        } finally {
-          entry.makingOffer = false;
+      pc.onnegotiationneeded = () => {
+        if (isOfferer(selfIdRef.current, socketId)) {
+          void makeOffer(entry);
+        } else {
+          sendSignal(socketId, { type: "pull-offer" });
         }
       };
 
       pc.onconnectionstatechange = () => {
         if (pc.connectionState === "failed") {
-          try {
-            pc.restartIce();
-          } catch {
-            /* ignore */
+          entry.failCount += 1;
+          if (entry.failCount <= 3) {
+            try {
+              pc.restartIce();
+            } catch {
+              /* ignore */
+            }
+            if (isOfferer(selfIdRef.current, socketId)) void makeOffer(entry);
+            else sendSignal(socketId, { type: "pull-offer" });
           }
         }
         if (pc.connectionState === "closed") {
@@ -246,7 +269,7 @@ export function useMeetingRtc({
       publishRemotes();
       return entry;
     },
-    [closePeer, publishRemotes, sendSignal, syncTracks]
+    [closePeer, makeOffer, publishRemotes, sendSignal, syncTracks]
   );
 
   const handleSignal = useCallback(
@@ -263,18 +286,22 @@ export function useMeetingRtc({
       const type = data.type;
 
       try {
+        if (type === "pull-offer") {
+          await syncTracks(entry);
+          await makeOffer(entry);
+          return;
+        }
         if (type === "offer" || type === "answer") {
           const sdp = String(data.sdp || "");
           if (!sdp) return;
-          const offerCollision =
-            type === "offer" && (entry.makingOffer || pc.signalingState !== "stable");
-          entry.ignoreOffer = !entry.polite && offerCollision;
-          if (entry.ignoreOffer) return;
-          if (offerCollision && pc.signalingState !== "stable") {
+          if (type === "offer" && isOfferer(selfIdRef.current, socketId)) {
+            return;
+          }
+          if (type === "offer" && pc.signalingState !== "stable") {
             try {
               await pc.setLocalDescription({ type: "rollback" });
             } catch {
-              /* Safari 可能不支援 rollback */
+              /* Safari */
             }
           }
           await pc.setRemoteDescription({ type, sdp });
@@ -292,16 +319,14 @@ export function useMeetingRtc({
           try {
             await pc.addIceCandidate(data.candidate);
           } catch (err) {
-            if (!entry.ignoreOffer) {
-              console.warn("[rtc] ice", err?.message || err);
-            }
+            console.warn("[rtc] ice", err?.message || err);
           }
         }
       } catch (err) {
         console.warn("[rtc] signal", err?.message || err);
       }
     },
-    [ensurePeer, sendSignal, syncTracks]
+    [ensurePeer, makeOffer, sendSignal, syncTracks]
   );
 
   const handleMedia = useCallback(
@@ -317,6 +342,7 @@ export function useMeetingRtc({
   );
 
   const resetAll = useCallback(() => {
+    pendingPeersRef.current = [];
     for (const id of [...peersRef.current.keys()]) closePeer(id);
   }, [closePeer]);
 
@@ -330,6 +356,10 @@ export function useMeetingRtc({
   closePeerRef.current = closePeer;
   const resetAllRef = useRef(resetAll);
   resetAllRef.current = resetAll;
+  const makeOfferRef = useRef(makeOffer);
+  makeOfferRef.current = makeOffer;
+  const sendSignalRef = useRef(sendSignal);
+  sendSignalRef.current = sendSignal;
 
   useEffect(() => {
     if (!enabled || !meetingId) {
@@ -340,12 +370,19 @@ export function useMeetingRtc({
     const socket = connectSocket();
     selfIdRef.current = socket.id || "";
 
+    const flushPending = () => {
+      if (!selfIdRef.current) return;
+      const queued = pendingPeersRef.current.splice(0);
+      for (const p of queued) ensurePeerRef.current(p);
+    };
+
     const applyRoster = ({ peers, iceServers, socketId } = {}) => {
       if (socketId) selfIdRef.current = socketId;
       else selfIdRef.current = socket.id || selfIdRef.current;
       if (Array.isArray(iceServers) && iceServers.length) {
         iceServersRef.current = iceServers;
       }
+      flushPending();
       const list = Array.isArray(peers) ? peers : [];
       for (const p of list) {
         ensurePeerRef.current(p);
@@ -353,7 +390,12 @@ export function useMeetingRtc({
     };
 
     const onConnect = () => {
-      selfIdRef.current = socket.id || "";
+      const nextId = socket.id || "";
+      if (selfIdRef.current && nextId && selfIdRef.current !== nextId) {
+        resetAllRef.current();
+      }
+      selfIdRef.current = nextId;
+      flushPending();
       socket.emit("rtc:peers", { meetingId });
     };
 
@@ -382,7 +424,23 @@ export function useMeetingRtc({
       socket.emit("rtc:peers", { meetingId });
     }
 
+    const watchdog = window.setInterval(() => {
+      const selfId = selfIdRef.current;
+      if (!selfId) return;
+      for (const entry of peersRef.current.values()) {
+        const ice = entry.pc?.iceConnectionState;
+        if (ice === "connected" || ice === "completed") continue;
+        if (entry.pc?.connectionState === "closed") continue;
+        if (isOfferer(selfId, entry.socketId)) {
+          void makeOfferRef.current(entry);
+        } else {
+          sendSignalRef.current(entry.socketId, { type: "pull-offer" });
+        }
+      }
+    }, 4000);
+
     return () => {
+      window.clearInterval(watchdog);
       socket.off("connect", onConnect);
       socket.off("meeting:joined", applyRoster);
       socket.off("rtc:peers", applyRoster);

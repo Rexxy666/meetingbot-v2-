@@ -201,7 +201,6 @@ function RemoteStreamVideo({
   trackSig = "",
 }) {
   const elRef = useRef(null);
-  const [needGesture, setNeedGesture] = useState(false);
   const showVideo = camOn && hasLiveVideoTrack(stream);
   const connecting =
     connectionState &&
@@ -211,32 +210,18 @@ function RemoteStreamVideo({
   useEffect(() => {
     const el = elRef.current;
     if (!el || !stream) return;
-    bindStreamToEl(el, stream, { mirror: false, muted: false });
-    el.muted = false;
-    el.volume = 1;
+    bindStreamToEl(el, stream, { mirror: false, muted: true });
+    el.muted = true;
     const play = el.play();
-    if (play?.then) {
-      play.then(() => setNeedGesture(false)).catch(() => setNeedGesture(true));
-    } else {
-      setNeedGesture(false);
-    }
+    if (play?.catch) play.catch(() => {});
   }, [stream, trackSig]);
-
-  const unlockAudio = () => {
-    const el = elRef.current;
-    if (!el) return;
-    el.muted = false;
-    const p = el.play();
-    if (p?.catch) p.catch(() => {});
-    else setNeedGesture(false);
-    setNeedGesture(false);
-  };
 
   return (
     <>
       <video
         ref={elRef}
         autoPlay
+        muted
         playsInline
         className="absolute inset-0 h-full w-full bg-navy-950 object-cover"
       />
@@ -259,15 +244,6 @@ function RemoteStreamVideo({
             </p>
           )}
         </div>
-      ) : null}
-      {needGesture ? (
-        <button
-          type="button"
-          onClick={unlockAudio}
-          className="absolute inset-x-2 bottom-8 z-[2] rounded-full bg-mint-500/90 px-3 py-1.5 text-[10px] font-bold text-navy-900"
-        >
-          點擊開啟對方聲音
-        </button>
       ) : null}
     </>
   );
@@ -685,7 +661,6 @@ export default function VideoPanel({
         const root = rootRef.current;
         if (!root) return;
         root.querySelectorAll("video").forEach((el) => {
-          if (el.muted) return;
           const p = el.play();
           if (p?.catch) p.catch(() => {});
         });

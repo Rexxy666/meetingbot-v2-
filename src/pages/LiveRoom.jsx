@@ -51,6 +51,8 @@ import { inviteToMeeting } from "../lib/api.js";
 import { useLocalMediaAndStt } from "../hooks/useLocalMediaAndStt.js";
 import { useMeetingRtc } from "../hooks/useMeetingRtc.js";
 import VideoPanel from "../components/VideoPanel.jsx";
+import RemoteAudioDock from "../components/RemoteAudioDock.jsx";
+import { unlockMeetingAudio } from "../lib/audioUnlock.js";
 
 const TYPING_PALETTE = [
   { text: "text-mint-700", bg: "bg-mint-50", dot: "bg-mint-500" },
@@ -2339,7 +2341,12 @@ export default function LiveRoom({ meeting, store, go, social, me, onAgendaChang
   ];
 
   const rtcControls = (
-    <div className="flex items-center justify-center gap-2 sm:gap-3">
+    <div
+      className="flex items-center justify-center gap-2 sm:gap-3"
+      onPointerDown={() => {
+        void unlockMeetingAudio();
+      }}
+    >
       <button
         type="button"
         onClick={toggleMic}
@@ -2737,7 +2744,13 @@ export default function LiveRoom({ meeting, store, go, social, me, onAgendaChang
   );
 
   return (
-    <div className="fade-in max-w-7xl mx-auto w-full h-full min-h-0 flex flex-col overflow-hidden px-3 pt-[max(0.75rem,env(safe-area-inset-top))] pb-[max(0.5rem,env(safe-area-inset-bottom))] md:px-6 md:pt-4 md:pb-4">
+    <div
+      className="fade-in max-w-7xl mx-auto w-full h-full min-h-0 flex flex-col overflow-hidden px-3 pt-[max(0.75rem,env(safe-area-inset-top))] pb-[max(0.5rem,env(safe-area-inset-bottom))] md:px-6 md:pt-4 md:pb-4"
+      onPointerDown={() => {
+        void unlockMeetingAudio();
+      }}
+    >
+      <RemoteAudioDock remotes={rtcRemotes} />
       {/* ── 頂部固定區：深色會議控制列 + 痛點（全站導覽改左側抽屜，不再覆蓋此列） ── */}
       <header className="shrink-0 space-y-2 mb-2 md:mb-3 z-10 relative">
         <MeetingHeader
@@ -2834,6 +2847,17 @@ export default function LiveRoom({ meeting, store, go, social, me, onAgendaChang
             {syncError}
           </p>
         )}
+        {rtcRemotes.some((p) => p.stream) ? (
+          <button
+            type="button"
+            onClick={() => {
+              void unlockMeetingAudio();
+            }}
+            className="w-full rounded-xl border border-mint-200 bg-mint-50 px-3 py-2 text-sm font-bold text-mint-800 dark:border-mint-500/30 dark:bg-mint-500/15 dark:text-mint-200"
+          >
+            聽不到其他人？點這裡開啟聲音
+          </button>
+        ) : null}
       </header>
 
       {inviting && social && (

@@ -17,6 +17,7 @@ import {
   discardMediaHandoff,
   stashMediaHandoff,
 } from "../lib/mediaSettings.js";
+import { unlockMeetingAudio } from "../lib/audioUnlock.js";
 
 const CARD = "bg-white border border-gray-100 shadow-card rounded-2xl";
 const SELECT =
@@ -264,6 +265,7 @@ export default function GreenRoom({ meeting, me, onCancel, onJoin }) {
     setBusyJoin(true);
     try {
       joiningRef.current = true;
+      void unlockMeetingAudio();
       // 進房前確保串流與軌道狀態對齊（即使兩者皆關也可不帶流）
       if (!mediaSettings.isMuted || !mediaSettings.isVideoOff) {
         await syncPreviewFromSettings(mediaSettings);

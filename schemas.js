@@ -276,7 +276,7 @@ export const rtcSignalSchema = z
     toSocketId: nonEmpty(120),
     data: z
       .object({
-        type: z.enum(["offer", "answer", "ice"]),
+        type: z.enum(["offer", "answer", "ice", "pull-offer"]),
         sdp: z.string().max(200_000).optional(),
         candidate: z.unknown().optional(),
       })
